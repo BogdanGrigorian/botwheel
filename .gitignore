@@ -1,0 +1,11 @@
+# --- AI agent context (personal, don't commit) ---
+AGENTS.md
+.github/copilot-instructions.md
+
+# --- Java build artifacts ---
+java/target/
+*.class
+
+# --- Generated test data ---
+test-vault.txt
+test-vault.decrypted.json

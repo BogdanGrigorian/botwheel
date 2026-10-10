@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Password Vault</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <!-- Lock screen -->
+    <section id="lock-screen" class="card">
+      <span class="badge">Telegram Mini App</span>
+      <h1 class="title">Password Vault</h1>
+      <p class="subtitle">Unlock the vault with your encryption key.</p>
+
+      <label class="field">
+        <span class="field-label">Password</span>
+        <input
+          type="password"
+          id="password"
+          class="input"
+          placeholder="Encryption key"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+      </label>
+
+      <button id="load-btn" class="button" type="button">Load from buffer</button>
+
+      <div id="paste-field" class="field" hidden>
+        <span class="field-label">Paste the vault message</span>
+        <textarea
+          id="paste-area"
+          class="textarea"
+          rows="4"
+          placeholder="VLT1:..."
+          spellcheck="false"
+        ></textarea>
+      </div>
+
+      <div id="result" class="result" hidden></div>
+    </section>
+
+    <!-- Main screen (search) -->
+    <section id="main-screen" class="main-screen" hidden>
+      <header class="main-header">
+        <div class="main-title">
+          <span class="badge">Password Vault</span>
+          <span id="vault-meta" class="vault-meta"></span>
+        </div>
+        <button id="lock-btn" class="icon-btn" type="button" title="Lock vault">🔒</button>
+      </header>
+
+      <div class="search-wrap">
+        <input
+          id="search-input"
+          class="search-input"
+          type="search"
+          placeholder="Search resources & tags"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+        <button id="clear-btn" class="clear-btn" type="button" hidden aria-label="Clear search">×</button>
+        <div id="suggestions" class="suggestions" hidden></div>
+      </div>
+
+      <div id="letter-strip-wrap" class="letter-strip-wrap" hidden>
+        <div id="letter-zoom" class="letter-zoom" hidden></div>
+        <div id="letter-strip" class="letter-strip"></div>
+      </div>
+
+      <div class="list-wrap">
+        <ul id="results" class="results"></ul>
+      </div>
+    </section>
+
+    <p class="user-info" id="user-info">Loading user info…</p>
+  </main>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="crypto-core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
