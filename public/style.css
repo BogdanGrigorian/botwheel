@@ -86,6 +86,17 @@ body {
   margin-bottom: 8px;
 }
 
+/* Keep a username field for the OS password manager, but hide it from the UI.
+   Offscreen (not display:none) so password managers still detect the login form. */
+.username-hidden {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 .input,
 .textarea {
   width: 100%;

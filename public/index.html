@@ -15,19 +15,17 @@
       <p class="subtitle">Unlock the vault with your encryption key.</p>
 
       <form id="lock-form" class="lock-form" autocomplete="on">
-        <label class="field">
-          <span class="field-label">Username</span>
-          <input
-            type="text"
-            id="username"
-            name="username"
-            class="input"
-            placeholder="Your Telegram handle"
-            autocomplete="username"
-            autocapitalize="off"
-            spellcheck="false"
-          />
-        </label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          class="username-hidden"
+          autocomplete="username"
+          aria-hidden="true"
+          tabindex="-1"
+          autocapitalize="off"
+          spellcheck="false"
+        />
 
         <label class="field">
           <span class="field-label">Password</span>
