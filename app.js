@@ -1,6 +1,10 @@
 const clockTime = document.getElementById("clock-time");
 const clockDate = document.getElementById("clock-date");
 const userInfo = document.getElementById("user-info");
+const currentUrl = document.getElementById("current-url");
+
+// --- Show the current URL, including query parameters ---
+currentUrl.textContent = window.location.href;
 
 // --- Telegram Web App integration (safe when running outside Telegram) ---
 const tg = window.Telegram?.WebApp;
