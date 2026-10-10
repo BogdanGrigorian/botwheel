@@ -34,6 +34,7 @@ body {
 }
 
 .card {
+  width: 100%;
   background: var(--card);
   border: 1px solid var(--card-border);
   border-radius: 20px;

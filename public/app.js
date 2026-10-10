@@ -1,6 +1,7 @@
 "use strict";
 
 const passwordInput = document.getElementById("password");
+const usernameInput = document.getElementById("username");
 const loadBtn = document.getElementById("load-btn");
 const lockForm = document.getElementById("lock-form");
 const pasteField = document.getElementById("paste-field");
@@ -52,6 +53,12 @@ if (tg) {
 } else {
   userInfo.textContent = "Running in a browser — open this app through your Telegram bot to get full integration.";
 }
+
+// Stable username so password managers treat this as a login form and can
+// save/fill a username + password pair. The vault key stays the password.
+usernameInput.value = tg && tg.initDataUnsafe && tg.initDataUnsafe.user
+  ? (tg.initDataUnsafe.user.username || String(tg.initDataUnsafe.user.id))
+  : "vault";
 
 // --- State ---
 const state = {
