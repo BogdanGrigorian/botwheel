@@ -5,7 +5,7 @@
 telegram.bot.token=1234567890:AA...replace-me...
 
 # GitHub Pages URL of the Mini App (public/ folder)
-telegram.miniapp.url=https://<YOUR-GITHUB-USER>.github.io/telegram-pmini/
+telegram.miniapp.url=https://pinwheel.github.io/botwheel/
 
 # Optional: a pre-generated VLT1 vault blob used as the demo seed for new users.
 # Leave empty to start with empty vaults.

@@ -1,4 +1,4 @@
-package com.telegrampmini;
+package com.botwheel;
 
 import java.io.IOException;
 import java.net.URI;

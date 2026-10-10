@@ -4,18 +4,18 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.telegrampmini</groupId>
-  <artifactId>telegram-pmini-java</artifactId>
+  <groupId>com.botwheel</groupId>
+  <artifactId>botwheel-bot</artifactId>
   <version>1.0.0</version>
   <packaging>jar</packaging>
 
-  <name>telegram-pmini-java</name>
-  <description>Java crypto tool for the Telegram Mini App (debug/test)</description>
+  <name>botwheel-bot</name>
+  <description>Botwheel Telegram bot (debug/test)</description>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>21</maven.compiler.release>
-    <exec.mainClass>com.telegrampmini.TelegramBot</exec.mainClass>
+    <exec.mainClass>com.botwheel.BotwheelBot</exec.mainClass>
   </properties>
 
   <build>

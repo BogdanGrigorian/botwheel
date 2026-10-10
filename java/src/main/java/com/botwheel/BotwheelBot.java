@@ -1,4 +1,4 @@
-package com.telegrampmini;
+package com.botwheel;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -9,14 +9,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Telegram bot (long polling) that hosts the Password Vault Mini App.
+ * Telegram bot (long polling) that hosts the Botwheel Vault Mini App.
  *
  * The bot does NO encryption/decryption: it only stores the opaque vault
  * transport string per user and hands it back over chat when the user taps
  * "Refresh database" (or sends /refresh). The user then opens the Mini App
  * (menu button / inline button) to unlock it with their password.
  */
-public final class TelegramBot {
+public final class BotwheelBot {
 
     private static final int MAX_MESSAGE_LENGTH = 4096;
 
@@ -25,7 +25,7 @@ public final class TelegramBot {
     private final VaultStore store;
     private final String seedBlob; // may be null
 
-    private TelegramBot(BotConfig config, TelegramApi api, VaultStore store, String seedBlob) {
+    private BotwheelBot(BotConfig config, TelegramApi api, VaultStore store, String seedBlob) {
         this.config = config;
         this.api = api;
         this.store = store;
@@ -46,7 +46,7 @@ public final class TelegramBot {
             System.out.println("Seed vault loaded (" + seedBlob.length() + " chars) from " + config.seedFile);
         }
 
-        new TelegramBot(config, api, store, seedBlob).run();
+        new BotwheelBot(config, api, store, seedBlob).run();
     }
 
     private static String loadSeed(String seedFile) {
@@ -143,7 +143,7 @@ public final class TelegramBot {
 
     private void welcome(long userId, long chatId) throws Exception {
         maybeSeed(userId);
-        String text = "\uD83D\uDD10 Password Vault\n\n"
+        String text = "\uD83D\uDD10 Botwheel Vault\n\n"
                 + "This bot stores your encrypted vault and hands it back to you over chat. "
                 + "Tap \u201CRefresh database\u201D to receive your vault, then open the Mini App to unlock it.";
         api.sendMessage(chatId, text, mainKeyboard());

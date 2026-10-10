@@ -1,4 +1,4 @@
-package com.telegrampmini;
+package com.botwheel;
 
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
@@ -14,8 +14,8 @@ import java.util.List;
  * Produces demo vault blobs for manual testing and seeds the bot's demo vault.
  *
  * Run (from java/):
- *   .\mvnw -q test-compile exec:java "-Dexec.mainClass=com.telegrampmini.TestUtils"
- *   .\mvnw -q test-compile exec:java "-Dexec.mainClass=com.telegrampmini.TestUtils" "-Dexec.args=200"
+ *   .\mvnw -q test-compile exec:java "-Dexec.mainClass=com.botwheel.TestUtils"
+ *   .\mvnw -q test-compile exec:java "-Dexec.mainClass=com.botwheel.TestUtils" "-Dexec.args=200"
  */
 public final class TestUtils {
 

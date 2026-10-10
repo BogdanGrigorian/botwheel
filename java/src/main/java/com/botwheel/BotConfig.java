@@ -1,4 +1,4 @@
-package com.telegrampmini;
+package com.botwheel;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -45,7 +45,7 @@ public final class BotConfig {
         token = token.trim();
 
         String url = resolve("telegram.miniapp.url", "MINIAPP_URL", props,
-                "https://<YOUR-GITHUB-USER>.github.io/telegram-pmini/");
+                "https://pinwheel.github.io/botwheel/");
 
         String seed = resolve("telegram.seed.file", "TELEGRAM_SEED_FILE", props, "test-vault.txt");
         if (seed != null) {
