@@ -54,11 +54,13 @@ if (tg) {
   userInfo.textContent = "Running in a browser — open this app through your Telegram bot to get full integration.";
 }
 
-// Stable username so password managers treat this as a login form and can
-// save/fill a username + password pair. The vault key stays the password.
-usernameInput.value = tg && tg.initDataUnsafe && tg.initDataUnsafe.user
-  ? (tg.initDataUnsafe.user.username || String(tg.initDataUnsafe.user.id))
-  : "vault";
+// Prefill the username from Telegram (used only to give password managers a
+// stable identity; decryption relies solely on the password).
+if (!usernameInput.value) {
+  usernameInput.value = tg && tg.initDataUnsafe && tg.initDataUnsafe.user
+    ? (tg.initDataUnsafe.user.username || String(tg.initDataUnsafe.user.id))
+    : "";
+}
 
 // --- State ---
 const state = {
