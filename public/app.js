@@ -430,31 +430,43 @@ async function load() {
       return;
     }
 
-    const pasted = pasteArea.value.trim();
-    let blobText = pasted;
-    if (!blobText) {
-      if (navigator.clipboard && navigator.clipboard.readText) {
-        try {
-          blobText = await navigator.clipboard.readText();
-        } catch (e) {
-          blobText = null;
-        }
+    // Candidate sources, in order: the clipboard buffer first, then the
+    // always-visible database-string box (fallback when the buffer is empty
+    // or its content is bad).
+    const candidates = [];
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      try {
+        const clip = (await navigator.clipboard.readText()).trim();
+        if (clip) candidates.push(clip);
+      } catch (e) {
+        // clipboard unavailable — fall through to the paste box
       }
     }
+    const pasted = pasteArea.value.trim();
+    if (pasted) candidates.push(pasted);
 
-    if (!blobText || !blobText.trim()) {
-      showResult("Clipboard is empty or unavailable — paste the vault message below.", true);
+    if (!candidates.length) {
+      showResult("Clipboard is empty or unavailable — paste the database string below.", true);
       showPasteFallback();
       return;
     }
 
     showResult("Decrypting…");
-    const vault = await window.CryptoCore.decryptDatabase(blobText, password);
-    result.hidden = true;
-    state.password = password;
-    state.vaultSalt = vault.salt;
-    state.key = null;
-    enterMainScreen(vault.entries);
+    let lastError = null;
+    for (const blobText of candidates) {
+      try {
+        const vault = await window.CryptoCore.decryptDatabase(blobText, password);
+        result.hidden = true;
+        state.password = password;
+        state.vaultSalt = vault.salt;
+        state.key = null;
+        enterMainScreen(vault.entries);
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    showResult("Failed to open vault: " + (lastError && lastError.message ? lastError.message : lastError), true);
   } catch (err) {
     showResult("Failed to open vault: " + (err && err.message ? err.message : err), true);
   } finally {

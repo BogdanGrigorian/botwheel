@@ -176,8 +176,10 @@ public final class BotwheelBot {
             return;
         }
         String blob = entry.blob;
-        if (blob.length() <= MAX_MESSAGE_LENGTH) {
-            api.sendMessage(chatId, "Your encrypted vault (v" + entry.version + "):\n\n" + blob, null);
+        // Wrap the vault in a <pre> block so the user can tap it to copy.
+        String text = "Your encrypted vault (v" + entry.version + "):\n\n<pre>" + blob + "</pre>";
+        if (text.length() <= MAX_MESSAGE_LENGTH) {
+            api.sendMessage(chatId, text, null, "HTML");
         } else {
             api.sendMessage(chatId,
                     "Your vault is too large for a single message — sending it as a file.", null);

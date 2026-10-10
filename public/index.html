@@ -21,7 +21,7 @@
           id="password"
           class="input"
           placeholder="Encryption key"
-          autocomplete="off"
+          autocomplete="current-password"
           autocapitalize="off"
           spellcheck="false"
         />
@@ -29,8 +29,8 @@
 
       <button id="load-btn" class="button" type="button">Load from buffer</button>
 
-      <div id="paste-field" class="field" hidden>
-        <span class="field-label">Paste the vault message</span>
+      <div id="paste-field" class="field">
+        <span class="field-label">Database string</span>
         <textarea
           id="paste-area"
           class="textarea"

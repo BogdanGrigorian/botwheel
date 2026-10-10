@@ -77,6 +77,20 @@ public final class TelegramApi {
         return call("sendMessage", params);
     }
 
+    public Map<String, Object> sendMessage(long chatId, String text, Map<String, Object> replyMarkup,
+            String parseMode) throws IOException, InterruptedException {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("chat_id", chatId);
+        params.put("text", text);
+        if (replyMarkup != null) {
+            params.put("reply_markup", replyMarkup);
+        }
+        if (parseMode != null && !parseMode.isEmpty()) {
+            params.put("parse_mode", parseMode);
+        }
+        return call("sendMessage", params);
+    }
+
     /** Upload a document (used for vaults that don't fit in a 4096-char message). */
     public Map<String, Object> sendDocument(long chatId, String filename, String content)
             throws IOException, InterruptedException {
