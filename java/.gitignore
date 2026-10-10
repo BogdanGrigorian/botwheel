@@ -2,3 +2,4 @@ target/
 *.class
 test-vault.txt
 test-vault.decrypted.json
+bot.properties

@@ -9,14 +9,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * CryptoTest — debug/test tool for CryptoCore.
+ * TestUtils — test-data generator for CryptoCore (no JUnit tests here).
  *
- * Run:
- *   javac CryptoCore.java CryptoTest.java
- *   java CryptoTest            # curated demo records
- *   java CryptoTest 200        # 200 random records
+ * Produces demo vault blobs for manual testing and seeds the bot's demo vault.
+ *
+ * Run (from java/):
+ *   .\mvnw -q test-compile exec:java "-Dexec.mainClass=com.telegrampmini.TestUtils"
+ *   .\mvnw -q test-compile exec:java "-Dexec.mainClass=com.telegrampmini.TestUtils" "-Dexec.args=200"
  */
-public final class CryptoTest {
+public final class TestUtils {
 
     private static final String USER_PASSWORD = "ChangeMe_TestPass123!";
 
@@ -52,7 +53,7 @@ public final class CryptoTest {
             { "Zoo membership", "https://zoo.example.com", "", "", "", "Z00!Pass" },
     };
 
-    private CryptoTest() {}
+    private TestUtils() {}
 
     /** Result of createRecords(). */
     public static class Created {

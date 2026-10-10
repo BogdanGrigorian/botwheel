@@ -15,7 +15,7 @@
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>21</maven.compiler.release>
-    <exec.mainClass>com.telegrampmini.CryptoTest</exec.mainClass>
+    <exec.mainClass>com.telegrampmini.TelegramBot</exec.mainClass>
   </properties>
 
   <build>
@@ -31,6 +31,7 @@
         <version>3.4.1</version>
         <configuration>
           <mainClass>${exec.mainClass}</mainClass>
+          <classpathScope>test</classpathScope>
         </configuration>
       </plugin>
     </plugins>
