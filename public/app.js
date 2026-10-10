@@ -20,6 +20,16 @@ const resetBtn = document.getElementById("reset-btn");
 const vaultMetaEl = document.getElementById("vault-meta");
 const lockBtn = document.getElementById("lock-btn");
 
+const detailsScreen = document.getElementById("details-screen");
+const detailsBack = document.getElementById("details-back");
+const detailsStatus = document.getElementById("details-status");
+const detailsName = document.getElementById("details-name");
+const detailsUrl = document.getElementById("details-url");
+const detailsNotes = document.getElementById("details-notes");
+const detailsUsername = document.getElementById("details-username");
+const detailsPassword = document.getElementById("details-password");
+const revealPasswordBtn = document.getElementById("reveal-password");
+
 // --- Telegram Web App integration (safe when running outside Telegram) ---
 const tg = window.Telegram?.WebApp;
 
@@ -43,9 +53,13 @@ if (tg) {
 
 // --- State ---
 const state = {
-  records: [],   // { id, n, u, o, lowerN, lowerU, lowerO, first }
+  records: [],   // { id, n, u, o, s, lowerN, lowerU, lowerO, first }
   query: "",
   letter: null,  // active quick-search letter filter
+  password: "",  // vault encryption key (kept in memory while unlocked)
+  vaultSalt: null, // Uint8Array — per-vault salt for credential keys
+  key: null,     // cached credential CryptoKey (derived lazily)
+  selected: null, // record id currently shown in the details view
 };
 
 // --- Helpers ---
@@ -109,6 +123,7 @@ function buildIndex(entries) {
       n: rec.n,
       u: rec.u,
       o: rec.o,
+      s: rec.s,
       lowerN: rec.n.toLowerCase(),
       lowerU: rec.u.toLowerCase(),
       lowerO: rec.o.toLowerCase(),
@@ -136,9 +151,14 @@ function lock() {
   state.records = [];
   state.query = "";
   state.letter = null;
+  state.password = "";
+  state.vaultSalt = null;
+  state.key = null;
+  state.selected = null;
   searchInput.value = "";
   passwordInput.value = "";
   result.hidden = true;
+  detailsScreen.hidden = true;
   mainScreen.hidden = true;
   lockScreen.hidden = false;
   userInfo.hidden = false;
@@ -208,6 +228,9 @@ function resultItem(rec, q) {
   const li = document.createElement("li");
   li.className = "result-item";
   li.dataset.first = rec.first;
+  li.tabIndex = 0;
+  li.setAttribute("role", "button");
+  li.setAttribute("aria-label", "Open record " + rec.n);
 
   const name = document.createElement("span");
   name.className = "result-name";
@@ -221,6 +244,21 @@ function resultItem(rec, q) {
     line.textContent = sub.join(" · ");
     li.appendChild(line);
   }
+
+  const chevron = document.createElement("span");
+  chevron.className = "result-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "›";
+  li.appendChild(chevron);
+
+  li.addEventListener("click", () => openRecord(rec));
+  li.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openRecord(rec);
+    }
+  });
+
   return li;
 }
 
@@ -249,6 +287,107 @@ function renderLetterStrip(activeLetter) {
     });
     letterStripEl.appendChild(btn);
   }
+}
+
+// --- Record details ---
+let detailsSecret = { username: "", password: "" };
+let passwordRevealed = false;
+
+async function getCredentialKey() {
+  if (!state.key) {
+    state.key = await window.CryptoCore.deriveKey(state.password, state.vaultSalt);
+  }
+  return state.key;
+}
+
+async function openRecord(rec) {
+  const id = rec.id;
+  state.selected = id;
+
+  detailsName.textContent = rec.n || "—";
+
+  if (rec.u) {
+    detailsUrl.textContent = rec.u;
+    detailsUrl.setAttribute("href", /^https?:\/\//i.test(rec.u) ? rec.u : "https://" + rec.u);
+  } else {
+    detailsUrl.textContent = "—";
+    detailsUrl.removeAttribute("href");
+  }
+
+  detailsNotes.textContent = rec.o || "—";
+
+  detailsUsername.textContent = "…";
+  detailsPassword.textContent = "••••••••";
+  detailsSecret = { username: "", password: "" };
+  passwordRevealed = false;
+  revealPasswordBtn.textContent = "Show";
+  detailsStatus.hidden = true;
+
+  mainScreen.hidden = true;
+  detailsScreen.hidden = false;
+
+  try {
+    const key = await getCredentialKey();
+    const secret = await window.CryptoCore.decryptWithKey(key, rec.s);
+    if (state.selected !== id) return; // another record was opened meanwhile
+    const sep = secret.indexOf("\u0000");
+    detailsSecret = {
+      username: sep === -1 ? secret : secret.slice(0, sep),
+      password: sep === -1 ? "" : secret.slice(sep + 1),
+    };
+    detailsUsername.textContent = detailsSecret.username;
+    detailsPassword.textContent = passwordRevealed
+      ? detailsSecret.password
+      : "•".repeat(Math.max(8, detailsSecret.password.length));
+  } catch (err) {
+    if (state.selected !== id) return;
+    detailsSecret = { username: "", password: "" };
+    detailsUsername.textContent = "—";
+    detailsPassword.textContent = "—";
+  }
+}
+
+function closeDetails() {
+  detailsScreen.hidden = true;
+  mainScreen.hidden = false;
+  state.selected = null;
+  passwordRevealed = false;
+  detailsSecret = { username: "", password: "" };
+  detailsStatus.hidden = true;
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (e) {
+      // fall through to the legacy fallback
+    }
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+let flashStatusTimer = null;
+
+function flashStatus() {
+  detailsStatus.textContent = "Copied!";
+  detailsStatus.hidden = false;
+  clearTimeout(flashStatusTimer);
+  flashStatusTimer = setTimeout(() => {
+    detailsStatus.hidden = true;
+  }, 1200);
 }
 
 // --- UI helpers ---
@@ -301,6 +440,9 @@ async function load() {
     showResult("Decrypting…");
     const vault = await window.CryptoCore.decryptDatabase(blobText, password);
     result.hidden = true;
+    state.password = password;
+    state.vaultSalt = vault.salt;
+    state.key = null;
     enterMainScreen(vault.entries);
   } catch (err) {
     showResult("Failed to open vault: " + (err && err.message ? err.message : err), true);
@@ -333,3 +475,23 @@ searchInput.addEventListener("keydown", (e) => {
 
 clearBtn.addEventListener("click", resetFilter);
 resetBtn.addEventListener("click", resetFilter);
+
+detailsBack.addEventListener("click", closeDetails);
+
+revealPasswordBtn.addEventListener("click", () => {
+  passwordRevealed = !passwordRevealed;
+  revealPasswordBtn.textContent = passwordRevealed ? "Hide" : "Show";
+  detailsPassword.textContent = passwordRevealed
+    ? detailsSecret.password
+    : "•".repeat(Math.max(8, detailsSecret.password.length));
+});
+
+detailsUsername.addEventListener("click", async () => {
+  await copyText(detailsSecret.username);
+  flashStatus();
+});
+
+detailsPassword.addEventListener("click", async () => {
+  await copyText(detailsSecret.password);
+  flashStatus();
+});

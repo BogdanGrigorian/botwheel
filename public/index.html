@@ -80,6 +80,45 @@
       </div>
     </section>
 
+    <!-- Record details -->
+    <section id="details-screen" class="details-screen" hidden>
+      <header class="details-header">
+        <button id="details-back" class="icon-btn" type="button" aria-label="Back">←</button>
+        <span class="details-title">Record details</span>
+        <span id="details-status" class="details-status" hidden></span>
+      </header>
+
+      <div class="details-body">
+        <div class="detail-field">
+          <span class="field-label">Title</span>
+          <span id="details-name" class="detail-value detail-name"></span>
+        </div>
+
+        <div class="detail-field">
+          <span class="field-label">Username</span>
+          <span id="details-username" class="detail-value detail-secret" title="Tap to copy"></span>
+        </div>
+
+        <div class="detail-field">
+          <span class="field-label">Password</span>
+          <div class="secret-row">
+            <span id="details-password" class="detail-value detail-password detail-secret" title="Tap to copy"></span>
+            <button id="reveal-password" class="mini-btn" type="button">Show</button>
+          </div>
+        </div>
+
+        <div class="detail-field">
+          <span class="field-label">URL</span>
+          <a id="details-url" class="detail-value detail-link" target="_blank" rel="noopener"></a>
+        </div>
+
+        <div class="detail-field">
+          <span class="field-label">Notes</span>
+          <span id="details-notes" class="detail-value detail-notes"></span>
+        </div>
+      </div>
+    </section>
+
     <p class="user-info" id="user-info">Loading user info…</p>
   </main>
 
