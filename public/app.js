@@ -15,7 +15,9 @@ const suggestionsEl = document.getElementById("suggestions");
 const resultsEl = document.getElementById("results");
 const letterStripWrap = document.getElementById("letter-strip-wrap");
 const letterStripEl = document.getElementById("letter-strip");
-const zoomEl = document.getElementById("letter-zoom");
+const filterBar = document.getElementById("filter-bar");
+const filterLabel = document.getElementById("filter-label");
+const resetBtn = document.getElementById("reset-btn");
 const vaultMetaEl = document.getElementById("vault-meta");
 const lockBtn = document.getElementById("lock-btn");
 
@@ -44,6 +46,7 @@ if (tg) {
 const state = {
   records: [],   // { id, n, u, o, lowerN, lowerU, lowerO, first }
   query: "",
+  letter: null,  // active quick-search letter filter
   debounce: null,
 };
 
@@ -121,6 +124,7 @@ function buildIndex(entries) {
 function enterMainScreen(entries) {
   buildIndex(entries);
   state.query = "";
+  state.letter = null;
   searchInput.value = "";
   vaultMetaEl.textContent = `${state.records.length} record${state.records.length === 1 ? "" : "s"}`;
   userInfo.hidden = true;
@@ -133,6 +137,7 @@ function enterMainScreen(entries) {
 function lock() {
   state.records = [];
   state.query = "";
+  state.letter = null;
   searchInput.value = "";
   passwordInput.value = "";
   result.hidden = true;
@@ -145,7 +150,26 @@ function lock() {
 function render() {
   renderSuggestions();
   renderResults();
+  renderFilterBar();
   clearBtn.hidden = !state.query;
+}
+
+function renderFilterBar() {
+  const active = state.query || state.letter;
+  filterBar.hidden = !active;
+  if (!active) return;
+  filterLabel.textContent = state.letter
+    ? `Filter: names starting with “${state.letter}”`
+    : `Search: “${state.query}”`;
+}
+
+function resetFilter() {
+  state.query = "";
+  state.letter = null;
+  searchInput.value = "";
+  suggestionsEl.hidden = true;
+  render();
+  searchInput.focus();
 }
 
 function renderSuggestions() {
@@ -181,8 +205,10 @@ function renderSuggestions() {
     item.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       state.query = s.rec.n;
+      state.letter = null;
       searchInput.value = s.rec.n;
       render();
+      suggestionsEl.hidden = true;
     });
     suggestionsEl.appendChild(item);
   }
@@ -193,7 +219,14 @@ function renderResults() {
   const q = state.query.trim().toLowerCase();
 
   let rows = [];
-  if (q) {
+  if (state.letter) {
+    rows = state.records
+      .filter((rec) => rec.first === state.letter)
+      .sort((a, b) => a.lowerN.localeCompare(b.lowerN));
+    letterStripWrap.hidden = false;
+    renderLetterStrip(state.letter);
+    for (const rec of rows) resultsEl.appendChild(resultItem(rec, ""));
+  } else if (q) {
     rows = state.records
       .map((rec) => ({ rec, score: matchScore(rec, q) }))
       .filter((m) => m.score !== Infinity)
@@ -204,7 +237,7 @@ function renderResults() {
   } else {
     rows = state.records.slice().sort((a, b) => a.lowerN.localeCompare(b.lowerN));
     letterStripWrap.hidden = false;
-    renderLetterStrip(rows);
+    renderLetterStrip(null);
     for (const rec of rows) resultsEl.appendChild(resultItem(rec, ""));
   }
 
@@ -213,7 +246,7 @@ function renderResults() {
     empty.className = "empty";
     empty.textContent = "No matches — try another query.";
     resultsEl.appendChild(empty);
-    letterStripWrap.hidden = true;
+    if (!state.letter) letterStripWrap.hidden = true;
   }
 }
 
@@ -237,10 +270,10 @@ function resultItem(rec, q) {
   return li;
 }
 
-function renderLetterStrip(rows) {
+function renderLetterStrip(activeLetter) {
   letterStripEl.innerHTML = "";
   const letters = [];
-  for (const rec of rows) {
+  for (const rec of state.records) {
     if (!letters.includes(rec.first)) letters.push(rec.first);
   }
   letters.sort((a, b) => {
@@ -251,35 +284,18 @@ function renderLetterStrip(rows) {
   for (const letter of letters) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "strip-letter";
+    btn.className = "strip-letter" + (letter === activeLetter ? " active" : "");
     btn.dataset.letter = letter;
     btn.textContent = letter;
+    btn.addEventListener("click", () => {
+      state.letter = state.letter === letter ? null : letter;
+      state.query = "";
+      searchInput.value = "";
+      suggestionsEl.hidden = true;
+      render();
+    });
     letterStripEl.appendChild(btn);
   }
-}
-
-function jumpTo(letter) {
-  const target = resultsEl.querySelector('[data-first="' + letter + '"]');
-  if (target) target.scrollIntoView({ block: "start" });
-}
-
-function showZoom(letterEl) {
-  const wrapRect = letterStripWrap.getBoundingClientRect();
-  const rect = letterEl.getBoundingClientRect();
-  zoomEl.textContent = letterEl.dataset.letter;
-  zoomEl.hidden = false;
-  const maxLeft = wrapRect.width - zoomEl.offsetWidth;
-  const left = rect.left - wrapRect.left + rect.width / 2 - zoomEl.offsetWidth / 2;
-  zoomEl.style.left = Math.max(0, Math.min(maxLeft, Math.round(left))) + "px";
-}
-
-function hideZoom() {
-  zoomEl.hidden = true;
-}
-
-function stripLetterFromPoint(e) {
-  const el = document.elementFromPoint(e.clientX, e.clientY);
-  return el && el.closest ? el.closest(".strip-letter") : null;
 }
 
 // --- UI helpers ---
@@ -349,6 +365,7 @@ passwordInput.addEventListener("keydown", (e) => {
 });
 
 searchInput.addEventListener("input", () => {
+  state.letter = null; // typing overrides the quick-letter filter
   clearTimeout(state.debounce);
   state.debounce = setTimeout(() => {
     state.query = searchInput.value;
@@ -364,44 +381,28 @@ searchInput.addEventListener("keydown", (e) => {
   }
 });
 
-clearBtn.addEventListener("click", () => {
-  searchInput.value = "";
-  state.query = "";
-  render();
-  searchInput.focus();
+clearBtn.addEventListener("click", resetFilter);
+resetBtn.addEventListener("click", resetFilter);
+
+// Close the suggestion dropdown when the input loses focus or the user taps elsewhere.
+let hideSuggestionsTimer = null;
+
+function scheduleHideSuggestions() {
+  clearTimeout(hideSuggestionsTimer);
+  hideSuggestionsTimer = setTimeout(() => {
+    suggestionsEl.hidden = true;
+  }, 150);
+}
+
+searchInput.addEventListener("focus", () => {
+  clearTimeout(hideSuggestionsTimer);
+  if (state.query) renderSuggestions();
 });
 
-// Letter strip: tap to jump, press-and-hold to show a magnified letter.
-let holdTimer = null;
-let stripActiveLetter = null;
+searchInput.addEventListener("blur", scheduleHideSuggestions);
 
-letterStripEl.addEventListener("pointerdown", (e) => {
-  const letter = stripLetterFromPoint(e);
-  if (!letter) return;
-  e.preventDefault();
-  letterStripEl.setPointerCapture(e.pointerId);
-  stripActiveLetter = letter;
-  jumpTo(letter.dataset.letter);
-  holdTimer = setTimeout(() => {
-    if (stripActiveLetter) showZoom(stripActiveLetter);
-  }, 150);
-
-  const move = (ev) => {
-    const l = stripLetterFromPoint(ev);
-    if (!l) return;
-    stripActiveLetter = l;
-    jumpTo(l.dataset.letter);
-    if (!zoomEl.hidden) showZoom(l);
-  };
-  const up = () => {
-    clearTimeout(holdTimer);
-    hideZoom();
-    stripActiveLetter = null;
-    letterStripEl.removeEventListener("pointermove", move);
-    letterStripEl.removeEventListener("pointerup", up);
-    letterStripEl.removeEventListener("pointercancel", up);
-  };
-  letterStripEl.addEventListener("pointermove", move);
-  letterStripEl.addEventListener("pointerup", up);
-  letterStripEl.addEventListener("pointercancel", up);
+document.addEventListener("pointerdown", (e) => {
+  if (e.target && e.target.closest && !e.target.closest(".search-wrap")) {
+    suggestionsEl.hidden = true;
+  }
 });
