@@ -10,3 +10,7 @@ telegram.miniapp.url=https://bogdangrigorian.github.io/botwheel/
 # Optional: a pre-generated VLT1 vault blob used as the demo seed for new users.
 # Leave empty to start with empty vaults.
 telegram.seed.file=test-vault.txt
+
+# Optional: comma/space-separated list of Telegram user IDs allowed to use the bot.
+# Leave empty to allow everyone.
+telegram.allowed.user.ids=

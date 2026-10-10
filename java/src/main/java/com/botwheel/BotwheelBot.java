@@ -115,6 +115,11 @@ public final class BotwheelBot {
         Object msg = cbq.get("message");
         long chatId = msg != null ? chatIdOf(Json.obj(msg)) : userId;
 
+        if (!isAllowed(userId)) {
+            api.answerCallbackQuery(callbackId, "403 Forbidden");
+            return;
+        }
+
         if ("refresh".equals(data)) {
             api.answerCallbackQuery(callbackId, "Sending your vault…");
             sendVault(userId, chatId);
@@ -126,6 +131,11 @@ public final class BotwheelBot {
     private void handleMessage(Map<String, Object> message) throws Exception {
         long userId = Json.num(Json.obj(message.get("from")).get("id"));
         long chatId = chatIdOf(message);
+
+        if (!isAllowed(userId)) {
+            api.sendMessage(chatId, "403 Forbidden", null);
+            return;
+        }
 
         String text = Json.str(message.get("text"));
         if (text == null) {
@@ -191,6 +201,10 @@ public final class BotwheelBot {
         if (seedBlob != null) {
             store.seedIfAbsent(userId, seedBlob);
         }
+    }
+
+    private boolean isAllowed(long userId) {
+        return config.allowedUserIds.isEmpty() || config.allowedUserIds.contains(userId);
     }
 
     private static long chatIdOf(Map<String, Object> message) {

@@ -6,6 +6,7 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
       MINIAPP_URL: ${MINIAPP_URL:-https://bogdangrigorian.github.io/botwheel/}
+      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
       # TELEGRAM_SEED_FILE: /data/test-vault.txt
     # volumes:
     #   - ./java/test-vault.txt:/data/test-vault.txt:ro

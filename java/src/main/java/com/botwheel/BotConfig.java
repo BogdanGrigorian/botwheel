@@ -5,7 +5,9 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.LinkedHashSet;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * Bot configuration, resolved in this order:
@@ -14,17 +16,20 @@ import java.util.Properties;
  *   telegram.bot.token   / TELEGRAM_BOT_TOKEN   (required)
  *   telegram.miniapp.url / MINIAPP_URL          (GitHub Pages URL of the Mini App)
  *   telegram.seed.file   / TELEGRAM_SEED_FILE   (optional demo vault blob)
+ *   telegram.allowed.user.ids / TELEGRAM_ALLOWED_USER_IDS (optional allowlist)
  */
 public final class BotConfig {
 
     public final String botToken;
     public final String miniAppUrl;
     public final String seedFile; // may be null
+    public final Set<Long> allowedUserIds; // empty = allow everyone
 
-    private BotConfig(String botToken, String miniAppUrl, String seedFile) {
+    private BotConfig(String botToken, String miniAppUrl, String seedFile, Set<Long> allowedUserIds) {
         this.botToken = botToken;
         this.miniAppUrl = miniAppUrl;
         this.seedFile = seedFile;
+        this.allowedUserIds = allowedUserIds;
     }
 
     public static BotConfig load() throws IOException {
@@ -52,7 +57,29 @@ public final class BotConfig {
             seed = seed.trim();
         }
 
-        return new BotConfig(token, url, (seed == null || seed.isEmpty()) ? null : seed);
+        String allowedRaw = resolve("telegram.allowed.user.ids", "TELEGRAM_ALLOWED_USER_IDS", props, "");
+        Set<Long> allowedUserIds = parseAllowedUsers(allowedRaw);
+
+        return new BotConfig(token, url,
+                (seed == null || seed.isEmpty()) ? null : seed, allowedUserIds);
+    }
+
+    private static Set<Long> parseAllowedUsers(String raw) {
+        Set<Long> ids = new LinkedHashSet<>();
+        if (raw == null || raw.isBlank()) {
+            return ids;
+        }
+        for (String part : raw.split("[,;\\s]+")) {
+            if (part.isEmpty()) {
+                continue;
+            }
+            try {
+                ids.add(Long.parseLong(part.trim()));
+            } catch (NumberFormatException ignored) {
+                // skip malformed entries
+            }
+        }
+        return ids;
     }
 
     private static String resolve(String propKey, String envKey, Properties props, String def) {
