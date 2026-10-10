@@ -13,8 +13,8 @@ import java.util.List;
  *
  * Run:
  *   javac CryptoCore.java CryptoTest.java
- *   java CryptoTest            # 5 demo records
- *   java CryptoTest 200        # 200 records
+ *   java CryptoTest            # curated demo records
+ *   java CryptoTest 200        # 200 random records
  */
 public final class CryptoTest {
 
@@ -34,6 +34,24 @@ public final class CryptoTest {
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%&*";
     private static final String LOGIN_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 
+    /** Curated demo records: { title, url, notes, login, email, password }. */
+    private static final String[][] DEMO_RECORDS = {
+            { "GitHub", "https://github.com", "work code hosting", "octocat", "octocat@github.com", "Gh_p@ss!2024" },
+            { "Google", "https://google.com", "personal mail", "jane.doe", "jane.doe@gmail.com", "Goog1e!Pass" },
+            { "Netflix", "https://netflix.com", "streaming", "jane", "jane@example.com", "Str3am!ng" },
+            { "Amazon", "https://amazon.com", "shopping", "jane.doe", "", "Sh0p!Pass" },
+            { "Bank - Savings", "", "savings account", "janedoe", "", "B@nk#Sav1ngs" },
+            { "Wi-Fi Router", "https://192.168.1.1", "home router admin", "admin", "", "R0uter!Pass" },
+            { "1Password", "https://1password.com", "", "jane@example.com", "jane@example.com", "M@ster!Key" },
+            { "Airbnb", "https://airbnb.com", "travel", "", "jane@example.com", "Tr@vel!2024" },
+            { "Dropbox", "https://dropbox.com", "backups", "jane.doe", "jane.doe@dropbox.com", "Dr0p!B0x" },
+            { "Spotify", "https://spotify.com", "music", "jane.doe", "jane.doe@spotify.com", "Mus1c!Pass" },
+            { "Twitter", "https://twitter.com", "social", "janedoe", "", "Tw1tt3r!" },
+            { "Steam", "https://steamcommunity.com", "gaming", "janedoe", "jane.doe@steam.com", "G@m3r!Pass" },
+            { "Work VPN", "", "corporate vpn", "jdoe", "jdoe@company.com", "VPn#W0rk" },
+            { "Zoo membership", "https://zoo.example.com", "", "", "", "Z00!Pass" },
+    };
+
     private CryptoTest() {}
 
     /** Result of createRecords(). */
@@ -52,8 +70,8 @@ public final class CryptoTest {
     }
 
     /**
-     * Create n records: random login + password, password encrypted,
-     * resource and tags in plaintext. Returns { salt, entries }.
+     * Create n records: random login, email and password; password encrypted,
+     * title/url/notes/login/email in plaintext. Returns { salt, entries }.
      */
     public static Created createRecords(int n, String password) throws Exception {
         byte[] salt = CryptoCore.randomBytes(CryptoCore.SALT_BYTES);
@@ -61,13 +79,33 @@ public final class CryptoTest {
 
         List<CryptoCore.Entry> entries = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            String username = "user" + randomString(6, LOGIN_ALPHABET);
+            String login = "user" + randomString(6, LOGIN_ALPHABET);
+            String email = login + "@" + NAMES[i % NAMES.length];
             String pass = randomString(12, PASSWORD_ALPHABET);
             String name = NAMES[i % NAMES.length] + "-" + (i + 1);
             String url = "https://" + NAMES[i % NAMES.length];
             String notes = NOTES[i % NOTES.length];
-            String s = CryptoCore.encryptWithKey(key, username + '\u0000' + pass);
-            entries.add(new CryptoCore.Entry(name, url, notes, s));
+            String s = CryptoCore.encryptWithKey(key, pass);
+            entries.add(new CryptoCore.Entry(name, url, notes, login, email, s));
+        }
+
+        Created c = new Created();
+        c.salt = salt;
+        c.entries = entries;
+        return c;
+    }
+
+    /**
+     * Create the curated demo vault (varied records exercising optional fields).
+     */
+    public static Created createDemoRecords(String password) throws Exception {
+        byte[] salt = CryptoCore.randomBytes(CryptoCore.SALT_BYTES);
+        SecretKeySpec key = CryptoCore.deriveKey(password, salt, CryptoCore.DEFAULT_ITERATIONS);
+
+        List<CryptoCore.Entry> entries = new ArrayList<>();
+        for (String[] row : DEMO_RECORDS) {
+            String s = CryptoCore.encryptWithKey(key, row[5]);
+            entries.add(new CryptoCore.Entry(row[0], row[1], row[2], row[3], row[4], s));
         }
 
         Created c = new Created();
@@ -77,11 +115,13 @@ public final class CryptoTest {
     }
 
     public static void main(String[] args) throws Exception {
-        int n = args.length > 0 ? Integer.parseInt(args[0]) : 5;
+        int n = args.length > 0 ? Integer.parseInt(args[0]) : 0;
 
         System.out.println("USER_PASSWORD  : \"" + USER_PASSWORD + "\"");
         System.out.println("PBKDF2 iters   : " + CryptoCore.DEFAULT_ITERATIONS);
-        System.out.println("Records        : " + n);
+        System.out.println(n > 0
+                ? "Records        : " + n
+                : "Records        : " + DEMO_RECORDS.length + " (demo set)");
         System.out.println();
 
         // 1) Single-field demo
@@ -90,13 +130,15 @@ public final class CryptoTest {
         System.out.println("Field decrypt  : " + CryptoCore.decryptSecret(field, USER_PASSWORD));
         System.out.println();
 
-        // 2) Build a vault of n records
-        Created created = createRecords(n, USER_PASSWORD);
+        // 2) Build a vault of records
+        Created created = n > 0 ? createRecords(n, USER_PASSWORD) : createDemoRecords(USER_PASSWORD);
         CryptoCore.Entry e0 = created.entries.get(0);
         System.out.println("Salt (b64url)  : " + CryptoCore.toBase64url(created.salt));
         System.out.println("Sample entry   : {\"n\":" + CryptoCore.jsonString(e0.n)
                 + ",\"u\":" + CryptoCore.jsonString(e0.u)
                 + ",\"o\":" + CryptoCore.jsonString(e0.o)
+                + ",\"l\":" + CryptoCore.jsonString(e0.l)
+                + ",\"e\":" + CryptoCore.jsonString(e0.e)
                 + ",\"s\":" + CryptoCore.jsonString(e0.s) + "}");
         System.out.println();
 
@@ -121,7 +163,8 @@ public final class CryptoTest {
             System.out.println("   {\"n\":" + CryptoCore.jsonString(e.n)
                     + ",\"u\":" + CryptoCore.jsonString(e.u)
                     + ",\"o\":" + CryptoCore.jsonString(e.o)
-                    + ",\"username\":" + CryptoCore.jsonString(e.username)
+                    + ",\"l\":" + CryptoCore.jsonString(e.l)
+                    + ",\"e\":" + CryptoCore.jsonString(e.e)
                     + ",\"password\":" + CryptoCore.jsonString(e.password) + "}");
         }
         System.out.println();
@@ -152,7 +195,8 @@ public final class CryptoTest {
             json.append("{\"n\":").append(CryptoCore.jsonString(e.n))
                 .append(",\"u\":").append(CryptoCore.jsonString(e.u))
                 .append(",\"o\":").append(CryptoCore.jsonString(e.o))
-                .append(",\"username\":").append(CryptoCore.jsonString(e.username))
+                .append(",\"l\":").append(CryptoCore.jsonString(e.l))
+                .append(",\"e\":").append(CryptoCore.jsonString(e.e))
                 .append(",\"password\":").append(CryptoCore.jsonString(e.password))
                 .append('}');
         }

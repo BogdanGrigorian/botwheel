@@ -50,20 +50,29 @@ public final class CryptoCore {
     /**
      * A stored record.
      * n = name/title (mandatory), u = url/domain (optional), o = notes (optional),
-     * s = encrypted "username\0password" (mandatory).
+     * l = login/username (optional, plaintext), e = email (optional, plaintext),
+     * s = encrypted password (mandatory).
      */
     public static class Entry {
         public String n;
         public String u;
         public String o;
+        public String l;
+        public String e;
         public String s;
 
         public Entry() {}
 
         public Entry(String n, String u, String o, String s) {
+            this(n, u, o, null, null, s);
+        }
+
+        public Entry(String n, String u, String o, String l, String e, String s) {
             this.n = n;
             this.u = u;
             this.o = o;
+            this.l = l;
+            this.e = e;
             this.s = s;
         }
     }
@@ -73,14 +82,16 @@ public final class CryptoCore {
         public String n;
         public String u;
         public String o;
-        public String username;
+        public String l;
+        public String e;
         public String password;
 
-        public DecryptedEntry(String n, String u, String o, String username, String password) {
+        public DecryptedEntry(String n, String u, String o, String l, String e, String password) {
             this.n = n;
             this.u = u;
             this.o = o;
-            this.username = username;
+            this.l = l;
+            this.e = e;
             this.password = password;
         }
     }
@@ -272,7 +283,7 @@ public final class CryptoCore {
         return vault;
     }
 
-    /** Unwrap every record's `s` field into { n, u, o, username, password }. */
+    /** Unwrap every record's `s` field (encrypted password) into { n, u, o, l, e, password }. */
     public static List<DecryptedEntry> decryptEntries(List<Entry> entries, String password, byte[] salt)
             throws Exception {
         return decryptEntries(entries, password, salt, DEFAULT_ITERATIONS);
@@ -285,7 +296,16 @@ public final class CryptoCore {
         for (Entry e : entries) {
             String secret = decryptWithKey(key, e.s);
             int sep = secret.indexOf('\u0000');
-            out.add(new DecryptedEntry(e.n, e.u, e.o, secret.substring(0, sep), secret.substring(sep + 1)));
+            String login = e.l != null ? e.l : "";
+            String pass;
+            if (sep != -1) {
+                // legacy "username\0password"
+                login = secret.substring(0, sep);
+                pass = secret.substring(sep + 1);
+            } else {
+                pass = secret;
+            }
+            out.add(new DecryptedEntry(e.n, e.u, e.o, login, e.e != null ? e.e : "", pass));
         }
         return out;
     }
@@ -294,10 +314,10 @@ public final class CryptoCore {
     // Minimal JSON (only the schema we produce/consume)
     // ------------------------------------------------------------------
 
-    /** Serialize entries to {"version":2,"entries":[{n,u,o,s},...]}. */
+    /** Serialize entries to {"version":3,"entries":[{n,u,o,l,e,s},...]}. */
     public static String toJson(List<Entry> entries) {
         StringBuilder sb = new StringBuilder();
-        sb.append("{\"version\":2,\"entries\":[");
+        sb.append("{\"version\":3,\"entries\":[");
         for (int i = 0; i < entries.size(); i++) {
             if (i > 0) {
                 sb.append(',');
@@ -306,6 +326,8 @@ public final class CryptoCore {
             sb.append("{\"n\":").append(jsonString(e.n))
               .append(",\"u\":").append(jsonString(e.u))
               .append(",\"o\":").append(jsonString(e.o))
+              .append(",\"l\":").append(jsonString(e.l))
+              .append(",\"e\":").append(jsonString(e.e))
               .append(",\"s\":").append(jsonString(e.s))
               .append('}');
         }
@@ -315,6 +337,9 @@ public final class CryptoCore {
 
     /** JSON-escape a string (public so callers can reuse it). */
     public static String jsonString(String s) {
+        if (s == null) {
+            return "\"\"";
+        }
         StringBuilder sb = new StringBuilder("\"");
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
@@ -350,7 +375,13 @@ public final class CryptoCore {
         List<Entry> entries = new ArrayList<>();
         for (Object o : (List<?>) m.get("entries")) {
             Map<?, ?> em = (Map<?, ?>) o;
-            entries.add(new Entry((String) em.get("n"), (String) em.get("u"), (String) em.get("o"), (String) em.get("s")));
+            entries.add(new Entry(
+                    (String) em.get("n"),
+                    (String) em.get("u"),
+                    (String) em.get("o"),
+                    (String) em.get("l"),
+                    (String) em.get("e"),
+                    (String) em.get("s")));
         }
         v.entries = entries;
         return v;

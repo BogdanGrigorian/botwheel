@@ -207,7 +207,7 @@
     var salt = opts.salt || randomBytes(SALT_BYTES);
     var key = await deriveKey(password, salt, rounds);
 
-    var json = encoder.encode(JSON.stringify({ version: 2, entries: entries }));
+    var json = encoder.encode(JSON.stringify({ version: 3, entries: entries }));
     var gz = await gzip(json);
     var enc = await aesEncrypt(key, gz);
 
@@ -246,7 +246,9 @@
   }
 
   /**
-   * Decrypt every entry's `s` field into { n, u, o, username, password }.
+   * Decrypt every entry's `s` field (encrypted password) into
+   * { n, u, o, l, e, password }. Legacy entries whose secret is
+   * "username\0password" are migrated: login is extracted from the secret.
    */
   async function decryptEntries(entries, password, salt, iterations) {
     var key = await deriveKey(password, salt, iterations);
@@ -255,12 +257,21 @@
       var e = entries[i];
       var secret = await decryptWithKey(key, e.s);
       var sep = secret.indexOf('\u0000');
+      var login = e.l || '';
+      var pass;
+      if (sep !== -1) {
+        login = secret.slice(0, sep);
+        pass = secret.slice(sep + 1);
+      } else {
+        pass = secret;
+      }
       out.push({
         n: e.n,
         u: e.u,
         o: e.o,
-        username: secret.slice(0, sep),
-        password: secret.slice(sep + 1),
+        l: login,
+        e: e.e || '',
+        password: pass,
       });
     }
     return out;

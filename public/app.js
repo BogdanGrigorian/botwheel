@@ -26,7 +26,8 @@ const detailsStatus = document.getElementById("details-status");
 const detailsName = document.getElementById("details-name");
 const detailsUrl = document.getElementById("details-url");
 const detailsNotes = document.getElementById("details-notes");
-const detailsUsername = document.getElementById("details-username");
+const detailsLogin = document.getElementById("details-login");
+const detailsEmail = document.getElementById("details-email");
 const detailsPassword = document.getElementById("details-password");
 const revealPasswordBtn = document.getElementById("reveal-password");
 
@@ -53,7 +54,7 @@ if (tg) {
 
 // --- State ---
 const state = {
-  records: [],   // { id, n, u, o, s, lowerN, lowerU, lowerO, first }
+  records: [],   // { id, n, u, o, l, e, s, lowerN, lowerU, lowerO, lowerL, lowerE, first }
   query: "",
   letter: null,  // active quick-search letter filter
   password: "",  // vault encryption key (kept in memory while unlocked)
@@ -102,17 +103,20 @@ function matchScore(rec, q) {
   if (u.startsWith(q)) return 4;
   if (u.includes(q)) return 5;
   if (rec.lowerO.includes(q)) return 6;
+  if (rec.lowerL.includes(q)) return 7;
+  if (rec.lowerE.includes(q)) return 8;
   return Infinity;
 }
 
 // --- Unlock / lock ---
-// v2 record: { n, u, o, s } — n mandatory, u/o optional, s = encrypted username\0password.
+// v3 record: { n, u, o, l, e, s } — n mandatory, s = encrypted password, l/e optional plaintext.
+// v2 record: { n, u, o, s } — s = encrypted "username\0password".
 // v1 record: { r, t, s } — migrate r -> name, t -> notes.
 function normalizeEntry(e) {
   if (e.n !== undefined) {
-    return { n: e.n || "", u: e.u || "", o: e.o || "", s: e.s || "" };
+    return { n: e.n || "", u: e.u || "", o: e.o || "", l: e.l || "", e: e.e || "", s: e.s || "" };
   }
-  return { n: e.r || "", u: "", o: e.t || "", s: e.s || "" };
+  return { n: e.r || "", u: "", o: e.t || "", l: "", e: "", s: e.s || "" };
 }
 
 function buildIndex(entries) {
@@ -123,10 +127,14 @@ function buildIndex(entries) {
       n: rec.n,
       u: rec.u,
       o: rec.o,
+      l: rec.l,
+      e: rec.e,
       s: rec.s,
       lowerN: rec.n.toLowerCase(),
       lowerU: rec.u.toLowerCase(),
       lowerO: rec.o.toLowerCase(),
+      lowerL: rec.l.toLowerCase(),
+      lowerE: rec.e.toLowerCase(),
       first: firstLetter(rec.n),
     };
   });
@@ -290,7 +298,7 @@ function renderLetterStrip(activeLetter) {
 }
 
 // --- Record details ---
-let detailsSecret = { username: "", password: "" };
+let detailsData = { login: "", email: "", password: "" };
 let passwordRevealed = false;
 
 async function getCredentialKey() {
@@ -315,10 +323,11 @@ async function openRecord(rec) {
   }
 
   detailsNotes.textContent = rec.o || "—";
+  detailsLogin.textContent = rec.l || "—";
+  detailsEmail.textContent = rec.e || "—";
 
-  detailsUsername.textContent = "…";
   detailsPassword.textContent = "••••••••";
-  detailsSecret = { username: "", password: "" };
+  detailsData = { login: rec.l || "", email: rec.e || "", password: "" };
   passwordRevealed = false;
   revealPasswordBtn.textContent = "Show";
   detailsStatus.hidden = true;
@@ -331,18 +340,20 @@ async function openRecord(rec) {
     const secret = await window.CryptoCore.decryptWithKey(key, rec.s);
     if (state.selected !== id) return; // another record was opened meanwhile
     const sep = secret.indexOf("\u0000");
-    detailsSecret = {
-      username: sep === -1 ? secret : secret.slice(0, sep),
-      password: sep === -1 ? "" : secret.slice(sep + 1),
-    };
-    detailsUsername.textContent = detailsSecret.username;
+    if (sep !== -1) {
+      // legacy v1/v2: "username\0password"
+      detailsData.login = secret.slice(0, sep);
+      detailsData.password = secret.slice(sep + 1);
+      detailsLogin.textContent = detailsData.login || "—";
+    } else {
+      detailsData.password = secret;
+    }
     detailsPassword.textContent = passwordRevealed
-      ? detailsSecret.password
-      : "•".repeat(Math.max(8, detailsSecret.password.length));
+      ? detailsData.password
+      : "•".repeat(Math.max(8, detailsData.password.length));
   } catch (err) {
     if (state.selected !== id) return;
-    detailsSecret = { username: "", password: "" };
-    detailsUsername.textContent = "—";
+    detailsData = { login: "", email: "", password: "" };
     detailsPassword.textContent = "—";
   }
 }
@@ -352,7 +363,7 @@ function closeDetails() {
   mainScreen.hidden = false;
   state.selected = null;
   passwordRevealed = false;
-  detailsSecret = { username: "", password: "" };
+  detailsData = { login: "", email: "", password: "" };
   detailsStatus.hidden = true;
 }
 
@@ -482,16 +493,21 @@ revealPasswordBtn.addEventListener("click", () => {
   passwordRevealed = !passwordRevealed;
   revealPasswordBtn.textContent = passwordRevealed ? "Hide" : "Show";
   detailsPassword.textContent = passwordRevealed
-    ? detailsSecret.password
-    : "•".repeat(Math.max(8, detailsSecret.password.length));
+    ? detailsData.password
+    : "•".repeat(Math.max(8, detailsData.password.length));
 });
 
-detailsUsername.addEventListener("click", async () => {
-  await copyText(detailsSecret.username);
+detailsLogin.addEventListener("click", async () => {
+  await copyText(detailsData.login);
+  flashStatus();
+});
+
+detailsEmail.addEventListener("click", async () => {
+  await copyText(detailsData.email);
   flashStatus();
 });
 
 detailsPassword.addEventListener("click", async () => {
-  await copyText(detailsSecret.password);
+  await copyText(detailsData.password);
   flashStatus();
 });
