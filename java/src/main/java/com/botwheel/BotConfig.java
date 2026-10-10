@@ -45,7 +45,7 @@ public final class BotConfig {
         token = token.trim();
 
         String url = resolve("telegram.miniapp.url", "MINIAPP_URL", props,
-                "https://pinwheel.github.io/botwheel/");
+                "https://bogdangrigorian.github.io/botwheel/");
 
         String seed = resolve("telegram.seed.file", "TELEGRAM_SEED_FILE", props, "test-vault.txt");
         if (seed != null) {

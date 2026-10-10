@@ -1,11 +1,11 @@
 services:
   botwheel-bot:
-    image: ghcr.io/pinwheel/botwheel-bot:latest
+    image: ghcr.io/bogdangrigorian/botwheel-bot:latest
     pull_policy: always
     restart: unless-stopped
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
-      MINIAPP_URL: ${MINIAPP_URL:-https://pinwheel.github.io/botwheel/}
+      MINIAPP_URL: ${MINIAPP_URL:-https://bogdangrigorian.github.io/botwheel/}
       # TELEGRAM_SEED_FILE: /data/test-vault.txt
     # volumes:
     #   - ./java/test-vault.txt:/data/test-vault.txt:ro
