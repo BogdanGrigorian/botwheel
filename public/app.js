@@ -11,7 +11,6 @@ const lockScreen = document.getElementById("lock-screen");
 const mainScreen = document.getElementById("main-screen");
 const searchInput = document.getElementById("search-input");
 const clearBtn = document.getElementById("clear-btn");
-const suggestionsEl = document.getElementById("suggestions");
 const resultsEl = document.getElementById("results");
 const letterStripWrap = document.getElementById("letter-strip-wrap");
 const letterStripEl = document.getElementById("letter-strip");
@@ -47,7 +46,6 @@ const state = {
   records: [],   // { id, n, u, o, lowerN, lowerU, lowerO, first }
   query: "",
   letter: null,  // active quick-search letter filter
-  debounce: null,
 };
 
 // --- Helpers ---
@@ -148,7 +146,6 @@ function lock() {
 
 // --- Rendering ---
 function render() {
-  renderSuggestions();
   renderResults();
   renderFilterBar();
   clearBtn.hidden = !state.query;
@@ -167,51 +164,8 @@ function resetFilter() {
   state.query = "";
   state.letter = null;
   searchInput.value = "";
-  suggestionsEl.hidden = true;
   render();
   searchInput.focus();
-}
-
-function renderSuggestions() {
-  suggestionsEl.innerHTML = "";
-  const q = state.query.trim().toLowerCase();
-  if (!q) {
-    suggestionsEl.hidden = true;
-    return;
-  }
-
-  const scored = state.records
-    .map((rec) => ({ rec, score: matchScore(rec, q) }))
-    .filter((m) => m.score !== Infinity)
-    .sort((a, b) => a.score - b.score || a.rec.lowerN.localeCompare(b.rec.lowerN))
-    .slice(0, 5);
-
-  if (!scored.length) {
-    suggestionsEl.hidden = true;
-    return;
-  }
-  suggestionsEl.hidden = false;
-
-  const group = document.createElement("div");
-  group.className = "suggestion-group";
-  group.textContent = "Matches";
-  suggestionsEl.appendChild(group);
-
-  for (const s of scored) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "suggestion-item";
-    item.innerHTML = highlight(s.rec.n, q);
-    item.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      state.query = s.rec.n;
-      state.letter = null;
-      searchInput.value = s.rec.n;
-      render();
-      suggestionsEl.hidden = true;
-    });
-    suggestionsEl.appendChild(item);
-  }
 }
 
 function renderResults() {
@@ -291,7 +245,6 @@ function renderLetterStrip(activeLetter) {
       state.letter = state.letter === letter ? null : letter;
       state.query = "";
       searchInput.value = "";
-      suggestionsEl.hidden = true;
       render();
     });
     letterStripEl.appendChild(btn);
@@ -366,11 +319,8 @@ passwordInput.addEventListener("keydown", (e) => {
 
 searchInput.addEventListener("input", () => {
   state.letter = null; // typing overrides the quick-letter filter
-  clearTimeout(state.debounce);
-  state.debounce = setTimeout(() => {
-    state.query = searchInput.value;
-    render();
-  }, 120);
+  state.query = searchInput.value;
+  render();
 });
 
 searchInput.addEventListener("keydown", (e) => {
@@ -383,26 +333,3 @@ searchInput.addEventListener("keydown", (e) => {
 
 clearBtn.addEventListener("click", resetFilter);
 resetBtn.addEventListener("click", resetFilter);
-
-// Close the suggestion dropdown when the input loses focus or the user taps elsewhere.
-let hideSuggestionsTimer = null;
-
-function scheduleHideSuggestions() {
-  clearTimeout(hideSuggestionsTimer);
-  hideSuggestionsTimer = setTimeout(() => {
-    suggestionsEl.hidden = true;
-  }, 150);
-}
-
-searchInput.addEventListener("focus", () => {
-  clearTimeout(hideSuggestionsTimer);
-  if (state.query) renderSuggestions();
-});
-
-searchInput.addEventListener("blur", scheduleHideSuggestions);
-
-document.addEventListener("pointerdown", (e) => {
-  if (e.target && e.target.closest && !e.target.closest(".search-wrap")) {
-    suggestionsEl.hidden = true;
-  }
-});
