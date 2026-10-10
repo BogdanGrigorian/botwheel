@@ -14,20 +14,22 @@
       <h1 class="title">Botwheel Vault</h1>
       <p class="subtitle">Unlock the vault with your encryption key.</p>
 
-      <label class="field">
-        <span class="field-label">Password</span>
-        <input
-          type="password"
-          id="password"
-          class="input"
-          placeholder="Encryption key"
-          autocomplete="current-password"
-          autocapitalize="off"
-          spellcheck="false"
-        />
-      </label>
+      <form id="lock-form" class="lock-form" autocomplete="on">
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input
+            type="password"
+            id="password"
+            class="input"
+            placeholder="Encryption key"
+            autocomplete="current-password"
+            autocapitalize="off"
+            spellcheck="false"
+          />
+        </label>
 
-      <button id="load-btn" class="button" type="button">Get into Mainframe</button>
+        <button id="load-btn" class="button" type="submit">Get into Mainframe</button>
+      </form>
 
       <div id="paste-field" class="field">
         <span class="field-label">Database string</span>

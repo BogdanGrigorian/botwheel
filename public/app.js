@@ -2,6 +2,7 @@
 
 const passwordInput = document.getElementById("password");
 const loadBtn = document.getElementById("load-btn");
+const lockForm = document.getElementById("lock-form");
 const pasteField = document.getElementById("paste-field");
 const pasteArea = document.getElementById("paste-area");
 const result = document.getElementById("result");
@@ -475,12 +476,11 @@ async function load() {
 }
 
 // --- Events ---
-loadBtn.addEventListener("click", load);
-lockBtn.addEventListener("click", lock);
-
-passwordInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") load();
+lockForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  load();
 });
+lockBtn.addEventListener("click", lock);
 
 searchInput.addEventListener("input", () => {
   state.letter = null; // typing overrides the quick-letter filter
