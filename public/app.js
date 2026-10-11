@@ -152,14 +152,14 @@ function clearCache() {
   preferredBlob = "";
 }
 
-function fmtTime(ms) {
+// Compact "YYYY-MM-DD HH:MM" stamp so the cache line stays on one row.
+function fmtStamp(ms) {
   const n = Number(ms);
-  if (!n) return "unknown";
-  try {
-    return new Date(n).toLocaleString();
-  } catch (e) {
-    return "unknown";
-  }
+  if (!n) return "";
+  const d = new Date(n);
+  const p = (x) => String(x).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+    " " + p(d.getHours()) + ":" + p(d.getMinutes());
 }
 
 // "none"    — nothing cached yet (first run)
@@ -184,20 +184,16 @@ function initCache() {
 
   if (status === "current") {
     preferredBlob = cached.blob;
-    cacheText.textContent =
-      "Cached copy is up to date (saved " + fmtTime(cached.savedAt) +
-      "). Enter your password to unlock — no need to re-insert it.";
+    const ts = fmtStamp(serverRevision.t || cached.t || cached.savedAt);
+    cacheText.innerHTML = "Cached" + (ts ? " " + escapeHtml(ts) : "") +
+      ', <span class="cache-verified">verified</span>';
   } else if (status === "stale") {
-    cacheText.textContent =
-      "The vault changed on the bot (bot: " + fmtTime(serverRevision.t) +
-      "; your copy: " + fmtTime(cached.t || cached.savedAt) +
-      "). Tap “Refresh database” in the chat, then paste the new string below.";
+    cacheText.innerHTML = "Cached " + escapeHtml(fmtStamp(cached.t || cached.savedAt)) +
+      ', <span class="cache-unverified">outdated</span> — tap “Refresh database”';
     pasteField.hidden = false;
   } else {
     preferredBlob = cached.blob;
-    cacheText.textContent =
-      "Using cached copy from " + fmtTime(cached.savedAt) +
-      " — couldn't verify it against the bot. Tap “Refresh” in the chat if anything is missing.";
+    cacheText.innerHTML = 'Cached, <span class="cache-unverified">unverified</span>';
   }
 }
 
