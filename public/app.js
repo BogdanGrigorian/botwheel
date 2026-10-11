@@ -562,24 +562,27 @@ async function load() {
       return;
     }
 
-    // Candidate sources, best first: the verified cached copy, then the
-    // clipboard buffer, then the always-visible database-string box
-    // (fallback when the buffer is empty or its content is bad).
+    // Candidate sources. A non-empty database-string box is authoritative — if
+    // it fails, we do NOT fall back. Otherwise try the cached copy, then the
+    // clipboard buffer.
     const candidates = [];
-    if (preferredBlob) candidates.push(preferredBlob);
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      try {
-        const clip = (await navigator.clipboard.readText()).trim();
-        if (clip && clip !== preferredBlob) candidates.push(clip);
-      } catch (e) {
-        // clipboard unavailable — fall through to the paste box
+    const pasted = pasteArea.value.trim();
+    if (pasted) {
+      candidates.push(pasted);
+    } else {
+      if (preferredBlob) candidates.push(preferredBlob);
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        try {
+          const clip = (await navigator.clipboard.readText()).trim();
+          if (clip && !candidates.includes(clip)) candidates.push(clip);
+        } catch (e) {
+          // clipboard unavailable — nothing to add
+        }
       }
     }
-    const pasted = pasteArea.value.trim();
-    if (pasted && pasted !== preferredBlob) candidates.push(pasted);
 
     if (!candidates.length) {
-      showResult("Clipboard is empty or unavailable — paste the database string below.", true);
+      showResult("No database string found — paste it below.", true);
       showPasteFallback();
       return;
     }
