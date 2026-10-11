@@ -88,10 +88,14 @@
   --card-outline: rgba(255, 42, 109, 0.4);
   --card-glow: 0 0 40px rgba(255, 42, 109, 0.25), 0 20px 60px rgba(0, 0, 0, 0.6);
   --title-glow: 0 0 14px rgba(255, 42, 109, 0.6), 0 0 3px rgba(255, 106, 193, 0.9);
-  --on-accent: #14000f;
-  --btn-bg: #ff2a6d;
-  --btn-edge: #ff6ac1;
-  --btn-shadow: 0 0 20px rgba(255, 42, 109, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -8px 14px rgba(80, 0, 40, 0.45);
+  --on-accent: #000000;
+  --btn-bg:
+    radial-gradient(120% 140% at 18% 12%, rgba(0, 0, 0, 0.25) 0%, transparent 40%),
+    radial-gradient(110% 120% at 82% 85%, rgba(0, 0, 0, 0.3) 0%, transparent 45%),
+    radial-gradient(70% 90% at 50% 120%, rgba(0, 0, 0, 0.2) 0%, transparent 55%),
+    linear-gradient(180deg, #d72b60 0%, #b3184b 100%);
+  --btn-edge: #e0527f;
+  --btn-shadow: 0 0 12px rgba(255, 42, 109, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -8px 14px rgba(60, 0, 30, 0.5);
   --badge-fg: #00e5ff;
   --badge-bg: rgba(0, 229, 255, 0.08);
   --badge-border: rgba(0, 229, 255, 0.5);
@@ -208,7 +212,7 @@ body {
   padding: 22px 18px;
   box-shadow: var(--card-glow);
   margin: auto;
-  max-width: 420px;
+  max-width: 378px;
   position: relative;
 }
 
@@ -802,19 +806,19 @@ body {
   right: 10px;
   z-index: 5;
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 
 .theme-btn {
-  width: 30px;
-  height: 30px;
-  padding: 3px;
+  width: 21px;
+  height: 21px;
+  padding: 2px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--card);
-  border: 1px solid var(--frame);
-  border-radius: 6px;
+  border: 1px solid var(--brass);
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -827,7 +831,7 @@ body {
   display: block;
   width: 100%;
   height: 100%;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .preview-default {
