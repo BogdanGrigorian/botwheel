@@ -20,6 +20,9 @@ const filterLabel = document.getElementById("filter-label");
 const resetBtn = document.getElementById("reset-btn");
 const vaultMetaEl = document.getElementById("vault-meta");
 const lockBtn = document.getElementById("lock-btn");
+const cacheBar = document.getElementById("cache-bar");
+const cacheText = document.getElementById("cache-text");
+const cacheForget = document.getElementById("cache-forget");
 
 const detailsScreen = document.getElementById("details-screen");
 const detailsBack = document.getElementById("details-back");
@@ -62,6 +65,141 @@ const state = {
   key: null,     // cached credential CryptoKey (derived lazily)
   selected: null, // record id currently shown in the details view
 };
+
+// --- Local cache of the last inserted database ----------------------------
+// The bot stamps every Mini App link it hands out with the vault's revision
+// (?v=<version>&t=<updatedAtMillis>&c=<checksum>). On open we compare that
+// stamp with the encrypted blob we cached in localStorage to decide whether
+// the user still holds the latest database or must fetch it again.
+//
+// The comparison key is the vault checksum (the 8 hex chars already embedded
+// in the "VLT1:...<checksum>" transport string) because it is content-based
+// and survives bot restarts, unlike a wall-clock timestamp. The timestamp is
+// still stored and shown to the user.
+const CACHE_KEYS = {
+  blob: "botwheel-vault-blob",
+  c: "botwheel-vault-checksum",
+  v: "botwheel-vault-version",
+  t: "botwheel-vault-bot-timestamp",
+  savedAt: "botwheel-vault-saved-at",
+};
+
+let serverRevision = { c: "", v: "", t: "" }; // from the URL the app was opened with
+let preferredBlob = "";                        // verified cached copy, tried first
+
+function checksumOf(blobText) {
+  const s = String(blobText || "");
+  const dot = s.lastIndexOf(".");
+  return dot === -1 ? "" : s.slice(dot + 1);
+}
+
+function readUrlRevision() {
+  const rev = { c: "", v: "", t: "" };
+  const absorb = (params) => {
+    if (!params) return;
+    rev.c = rev.c || params.get("c") || "";
+    rev.v = rev.v || params.get("v") || "";
+    rev.t = rev.t || params.get("t") || "";
+  };
+  try { absorb(new URLSearchParams(location.search)); } catch (e) {}
+  try {
+    if (location.hash && location.hash.length > 1) {
+      absorb(new URLSearchParams(location.hash.slice(1)));
+    }
+  } catch (e) {}
+  const sp = tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
+  if (sp) {
+    try { absorb(new URLSearchParams(sp)); } catch (e) {}
+  }
+  return rev;
+}
+
+function readCache() {
+  try {
+    const blob = localStorage.getItem(CACHE_KEYS.blob);
+    if (!blob) return null;
+    return {
+      blob,
+      c: localStorage.getItem(CACHE_KEYS.c) || "",
+      v: localStorage.getItem(CACHE_KEYS.v) || "",
+      t: localStorage.getItem(CACHE_KEYS.t) || "",
+      savedAt: Number(localStorage.getItem(CACHE_KEYS.savedAt) || 0),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeCache(blobText) {
+  try {
+    const c = checksumOf(blobText);
+    // Only trust the link's version/timestamp when it describes this exact blob.
+    const matches = serverRevision.c && c && serverRevision.c === c;
+    localStorage.setItem(CACHE_KEYS.blob, blobText);
+    localStorage.setItem(CACHE_KEYS.c, c);
+    localStorage.setItem(CACHE_KEYS.v, matches ? serverRevision.v : "");
+    localStorage.setItem(CACHE_KEYS.t, matches ? serverRevision.t : "");
+    localStorage.setItem(CACHE_KEYS.savedAt, String(Date.now()));
+  } catch (e) {
+    // storage unavailable — caching is best-effort
+  }
+}
+
+function clearCache() {
+  try {
+    Object.keys(CACHE_KEYS).forEach((k) => localStorage.removeItem(CACHE_KEYS[k]));
+  } catch (e) {}
+  preferredBlob = "";
+}
+
+function fmtTime(ms) {
+  const n = Number(ms);
+  if (!n) return "unknown";
+  try {
+    return new Date(n).toLocaleString();
+  } catch (e) {
+    return "unknown";
+  }
+}
+
+// "none"    — nothing cached yet (first run)
+// "current" — cache matches the revision the bot advertised
+// "stale"   — the bot has a different database; the user must re-insert it
+// "unknown" — a cache exists but the link carried no revision to check against
+function cacheStatus(cached) {
+  if (!cached) return "none";
+  if (serverRevision.c) return cached.c === serverRevision.c ? "current" : "stale";
+  if (serverRevision.t && cached.t) return cached.t === serverRevision.t ? "current" : "stale";
+  return "unknown";
+}
+
+function initCache() {
+  serverRevision = readUrlRevision();
+  const cached = readCache();
+  const status = cacheStatus(cached);
+  if (status === "none") return;
+
+  cacheBar.classList.toggle("stale", status === "stale");
+  cacheBar.hidden = false;
+
+  if (status === "current") {
+    preferredBlob = cached.blob;
+    cacheText.textContent =
+      "Cached copy is up to date (saved " + fmtTime(cached.savedAt) +
+      "). Enter your password to unlock — no need to re-insert it.";
+  } else if (status === "stale") {
+    cacheText.textContent =
+      "The vault changed on the bot (bot: " + fmtTime(serverRevision.t) +
+      "; your copy: " + fmtTime(cached.t || cached.savedAt) +
+      "). Tap “Refresh database” in the chat, then paste the new string below.";
+    pasteField.hidden = false;
+  } else {
+    preferredBlob = cached.blob;
+    cacheText.textContent =
+      "Using cached copy from " + fmtTime(cached.savedAt) +
+      " — couldn't verify it against the bot. Tap “Refresh” in the chat if anything is missing.";
+  }
+}
 
 // --- Helpers ---
 function escapeHtml(s) {
@@ -428,20 +566,21 @@ async function load() {
       return;
     }
 
-    // Candidate sources, in order: the clipboard buffer first, then the
-    // always-visible database-string box (fallback when the buffer is empty
-    // or its content is bad).
+    // Candidate sources, best first: the verified cached copy, then the
+    // clipboard buffer, then the always-visible database-string box
+    // (fallback when the buffer is empty or its content is bad).
     const candidates = [];
+    if (preferredBlob) candidates.push(preferredBlob);
     if (navigator.clipboard && navigator.clipboard.readText) {
       try {
         const clip = (await navigator.clipboard.readText()).trim();
-        if (clip) candidates.push(clip);
+        if (clip && clip !== preferredBlob) candidates.push(clip);
       } catch (e) {
         // clipboard unavailable — fall through to the paste box
       }
     }
     const pasted = pasteArea.value.trim();
-    if (pasted) candidates.push(pasted);
+    if (pasted && pasted !== preferredBlob) candidates.push(pasted);
 
     if (!candidates.length) {
       showResult("Clipboard is empty or unavailable — paste the database string below.", true);
@@ -455,6 +594,7 @@ async function load() {
       try {
         const vault = await window.CryptoCore.decryptDatabase(blobText, password);
         result.hidden = true;
+        writeCache(blobText);
         state.password = password;
         state.vaultSalt = vault.salt;
         state.key = null;
@@ -548,3 +688,13 @@ function applyTheme(name) {
 themeButtons.forEach((btn) => {
   btn.addEventListener("click", () => applyTheme(btn.dataset.themeValue));
 });
+
+// --- Cache controls ---
+cacheForget.addEventListener("click", () => {
+  clearCache();
+  cacheBar.hidden = true;
+  pasteArea.value = "";
+  showResult("Cached copy deleted — paste the database string from the bot.", false);
+});
+
+initCache();

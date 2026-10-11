@@ -120,8 +120,17 @@ public final class TelegramApi {
         return call("answerCallbackQuery", params);
     }
 
-    /** Host the Mini App as the private-chat menu button. */
+    /** Host the Mini App as the default private-chat menu button. */
     public Map<String, Object> setChatMenuButtonWebApp(String label, String url)
+            throws IOException, InterruptedException {
+        return setChatMenuButtonWebApp(null, label, url);
+    }
+
+    /**
+     * Host the Mini App as the menu button, optionally scoped to one chat
+     * ({@code chatId == null} sets the default for all chats).
+     */
+    public Map<String, Object> setChatMenuButtonWebApp(Long chatId, String label, String url)
             throws IOException, InterruptedException {
         Map<String, Object> webApp = new LinkedHashMap<>();
         webApp.put("url", url);
@@ -130,6 +139,9 @@ public final class TelegramApi {
         button.put("text", label);
         button.put("web_app", webApp);
         Map<String, Object> params = new LinkedHashMap<>();
+        if (chatId != null) {
+            params.put("chat_id", chatId);
+        }
         params.put("menu_button", button);
         return call("setChatMenuButton", params);
     }

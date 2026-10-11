@@ -153,19 +153,20 @@ public final class BotwheelBot {
 
     private void welcome(long userId, long chatId) throws Exception {
         maybeSeed(userId);
+        refreshMenuButton(userId, chatId);
         String text = "\uD83D\uDD10 Botwheel Vault\n\n"
                 + "This bot stores your encrypted vault and hands it back to you over chat. "
                 + "Tap \u201CRefresh database\u201D to receive your vault, then open the Mini App to unlock it.";
-        api.sendMessage(chatId, text, mainKeyboard());
+        api.sendMessage(chatId, text, mainKeyboard(userId));
     }
 
-    private Map<String, Object> mainKeyboard() {
+    private Map<String, Object> mainKeyboard(long userId) {
         Map<String, Object> refreshBtn = new LinkedHashMap<>();
         refreshBtn.put("text", "Refresh database");
         refreshBtn.put("callback_data", "refresh");
 
         Map<String, Object> webApp = new LinkedHashMap<>();
-        webApp.put("url", config.miniAppUrl);
+        webApp.put("url", miniAppUrl(userId));
         Map<String, Object> openBtn = new LinkedHashMap<>();
         openBtn.put("text", "Open Vault");
         openBtn.put("web_app", webApp);
@@ -177,6 +178,7 @@ public final class BotwheelBot {
 
     private void sendVault(long userId, long chatId) throws Exception {
         maybeSeed(userId);
+        refreshMenuButton(userId, chatId);
         VaultStore.Entry entry = store.get(userId);
         if (entry == null || entry.blob == null || entry.blob.isEmpty()) {
             api.sendMessage(chatId,
@@ -201,6 +203,41 @@ public final class BotwheelBot {
         if (seedBlob != null) {
             store.seedIfAbsent(userId, seedBlob);
         }
+    }
+
+    /**
+     * The Mini App URL with this user's current vault revision stamped in.
+     * The Mini App reads {@code v}/{@code t}/{@code c} and compares them with
+     * the copy it cached in localStorage to decide whether it is up to date.
+     */
+    private String miniAppUrl(long userId) {
+        VaultStore.Entry entry = store.get(userId);
+        if (entry == null) {
+            return config.miniAppUrl;
+        }
+        String sep = config.miniAppUrl.contains("?") ? "&" : "?";
+        return config.miniAppUrl + sep
+                + "v=" + entry.version
+                + "&t=" + entry.updatedAtMillis
+                + "&c=" + checksumOf(entry.blob);
+    }
+
+    /** Keep the per-chat "Open Vault" quick-access button at the current revision. */
+    private void refreshMenuButton(long userId, long chatId) {
+        try {
+            api.setChatMenuButtonWebApp(chatId, "Open Vault", miniAppUrl(userId));
+        } catch (Exception e) {
+            System.err.println("Could not update menu button for chat " + chatId + ": " + e.getMessage());
+        }
+    }
+
+    /** The 8-hex checksum embedded in the "VLT1:...<checksum>" transport string. */
+    private static String checksumOf(String blob) {
+        if (blob == null) {
+            return "";
+        }
+        int dot = blob.lastIndexOf('.');
+        return dot == -1 ? "" : blob.substring(dot + 1);
     }
 
     private boolean isAllowed(long userId) {
