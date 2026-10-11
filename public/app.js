@@ -1,5 +1,13 @@
 "use strict";
 
+// The cache-busting version of this very script (index.html loads
+// "app.js?v=N"), shown on the lock screen so it is obvious which build runs.
+const APP_VERSION = (function () {
+  const src = (document.currentScript && document.currentScript.src) || "";
+  const match = src.match(/[?&]v=([^&]+)/);
+  return match ? match[1] : "";
+})();
+
 const passwordInput = document.getElementById("password");
 const strengthEl = document.getElementById("strength");
 const strengthFill = document.getElementById("strength-fill");
@@ -10,6 +18,7 @@ const lockForm = document.getElementById("lock-form");
 const pasteField = document.getElementById("paste-field");
 const pasteArea = document.getElementById("paste-area");
 const result = document.getElementById("result");
+const appVersionEl = document.getElementById("app-version");
 
 const lockScreen = document.getElementById("lock-screen");
 const mainScreen = document.getElementById("main-screen");
@@ -60,6 +69,12 @@ const saveCommand = document.getElementById("save-command");
 const saveCopy = document.getElementById("save-copy");
 const saveSend = document.getElementById("save-send");
 const saveHint = document.getElementById("save-hint");
+
+// Version of the running build (the "?v=" from this script's own URL).
+if (appVersionEl) {
+  appVersionEl.textContent = APP_VERSION ? "v" + APP_VERSION : "";
+  appVersionEl.hidden = !APP_VERSION;
+}
 
 // --- Telegram Web App integration (safe when running outside Telegram) ---
 const tg = window.Telegram?.WebApp;

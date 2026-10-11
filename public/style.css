@@ -414,6 +414,16 @@ body {
   color: var(--teal);
 }
 
+/* Build version shown on the lock screen (read from the script URL). */
+.app-version {
+  margin-top: 16px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .result {
   margin-top: 4px;
   background: var(--result-bg);
