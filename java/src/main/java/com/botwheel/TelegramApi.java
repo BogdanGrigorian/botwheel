@@ -15,8 +15,8 @@ import java.util.Map;
  * Minimal Telegram Bot API client (JDK HttpClient, no external deps).
  *
  * Only the methods the vault bot needs are implemented: getMe, getUpdates
- * (long polling), sendMessage, sendDocument, answerCallbackQuery and
- * setChatMenuButton.
+ * (long polling), sendMessage, sendDocument, answerCallbackQuery,
+ * setChatMenuButton and setMyCommands.
  */
 public final class TelegramApi {
 
@@ -120,28 +120,15 @@ public final class TelegramApi {
         return call("answerCallbackQuery", params);
     }
 
-    /** Host the Mini App as the default private-chat menu button. */
-    public Map<String, Object> setChatMenuButtonWebApp(String label, String url)
-            throws IOException, InterruptedException {
-        return setChatMenuButtonWebApp(null, label, url);
-    }
-
     /**
-     * Host the Mini App as the menu button, optionally scoped to one chat
-     * ({@code chatId == null} sets the default for all chats).
+     * Reset the chat menu button to Telegram's default (the bot command list).
+     * The Mini App is reached through the reply-keyboard button instead, because
+     * that is the only launch type that lets it {@code sendData()} back to us.
      */
-    public Map<String, Object> setChatMenuButtonWebApp(Long chatId, String label, String url)
-            throws IOException, InterruptedException {
-        Map<String, Object> webApp = new LinkedHashMap<>();
-        webApp.put("url", url);
+    public Map<String, Object> setChatMenuButtonDefault() throws IOException, InterruptedException {
         Map<String, Object> button = new LinkedHashMap<>();
-        button.put("type", "web_app");
-        button.put("text", label);
-        button.put("web_app", webApp);
+        button.put("type", "default");
         Map<String, Object> params = new LinkedHashMap<>();
-        if (chatId != null) {
-            params.put("chat_id", chatId);
-        }
         params.put("menu_button", button);
         return call("setChatMenuButton", params);
     }

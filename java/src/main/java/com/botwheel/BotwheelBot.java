@@ -76,8 +76,14 @@ public final class BotwheelBot {
     }
 
     public void run() throws Exception {
-        // Host the Mini App via the private-chat menu button.
-        api.setChatMenuButtonWebApp("Open Vault", config.miniAppUrl);
+        // The Mini App is reachable ONLY through the reply-keyboard button — the
+        // one launch type that lets it sendData() back to us — so make sure no
+        // web_app menu button lingers next to the input field.
+        try {
+            api.setChatMenuButtonDefault();
+        } catch (Exception e) {
+            System.err.println("Could not reset the menu button: " + e.getMessage());
+        }
         try {
             api.setMyCommands(commandList());
         } catch (Exception e) {
@@ -177,31 +183,24 @@ public final class BotwheelBot {
 
     private void welcome(long userId, long chatId) throws Exception {
         maybeSeed(userId);
-        refreshMenuButton(userId, chatId);
         String text = "\uD83D\uDD10 Botwheel Vault\n\n"
                 + "This bot stores your encrypted vault and hands it back to you over chat. "
                 + "Tap \u201CRefresh database\u201D to receive your vault, then open the Mini App to unlock it. "
                 + "When you create or edit records, the Mini App sends the new vault back here automatically.";
-        api.sendMessage(chatId, text, mainKeyboard(userId));
+        api.sendMessage(chatId, text, mainKeyboard());
         api.sendMessage(chatId,
-                "Open the vault with the button below to add or edit records \u2014 changes are "
-                        + "sent back to me automatically.",
+                "Use the \u201COpen Vault\u201D keyboard button below the message field to open, "
+                        + "edit and save the vault \u2014 changes are sent back to me automatically.",
                 updateKeyboard(userId));
     }
 
-    private Map<String, Object> mainKeyboard(long userId) {
+    private Map<String, Object> mainKeyboard() {
         Map<String, Object> refreshBtn = new LinkedHashMap<>();
         refreshBtn.put("text", "Refresh database");
         refreshBtn.put("callback_data", "refresh");
 
-        Map<String, Object> webApp = new LinkedHashMap<>();
-        webApp.put("url", miniAppUrl(userId));
-        Map<String, Object> openBtn = new LinkedHashMap<>();
-        openBtn.put("text", "Open Vault");
-        openBtn.put("web_app", webApp);
-
         Map<String, Object> markup = new LinkedHashMap<>();
-        markup.put("inline_keyboard", List.of(List.of(refreshBtn), List.of(openBtn)));
+        markup.put("inline_keyboard", List.of(List.of(refreshBtn)));
         return markup;
     }
 
@@ -226,7 +225,6 @@ public final class BotwheelBot {
 
     private void sendVault(long userId, long chatId) throws Exception {
         maybeSeed(userId);
-        refreshMenuButton(userId, chatId);
         VaultStore.Entry entry = store.get(userId);
         if (entry == null || entry.blob == null || entry.blob.isEmpty()) {
             api.sendMessage(chatId,
@@ -242,7 +240,8 @@ public final class BotwheelBot {
             api.sendMessage(chatId, text, updateKeyboard(userId), "HTML");
         } else {
             api.sendMessage(chatId,
-                    "Your vault is too large for a single message — sending it as a file.", null);
+                    "Your vault is too large for a single message \u2014 sending it as a file.",
+                    updateKeyboard(userId));
             api.sendDocument(chatId, "vault-v" + entry.version + ".txt", blob);
         }
     }
@@ -272,10 +271,11 @@ public final class BotwheelBot {
             return;
         }
         VaultStore.Entry entry = store.put(userId, blob);
-        refreshMenuButton(userId, chatId);
+        // Re-send the keyboard so its Mini App URL carries the new revision.
         api.sendMessage(chatId,
                 "Vault updated to v" + entry.version + " (" + entry.checksum + "). "
-                        + "Tap \u201CRefresh database\u201D to receive it.", null);
+                        + "Tap \u201CRefresh database\u201D to receive it.",
+                updateKeyboard(userId));
     }
 
     /** True if the message already carries a vault transport string. */
@@ -357,15 +357,6 @@ public final class BotwheelBot {
                 + "v=" + entry.version
                 + "&t=" + entry.updatedAtMillis
                 + "&c=" + entry.checksum;
-    }
-
-    /** Keep the per-chat "Open Vault" quick-access button at the current revision. */
-    private void refreshMenuButton(long userId, long chatId) {
-        try {
-            api.setChatMenuButtonWebApp(chatId, "Open Vault", miniAppUrl(userId));
-        } catch (Exception e) {
-            System.err.println("Could not update menu button for chat " + chatId + ": " + e.getMessage());
-        }
     }
 
     private boolean isAllowed(long userId) {

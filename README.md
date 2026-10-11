@@ -16,7 +16,7 @@ flowchart LR
   APP -->|decrypts locally with passphrase| U
 ```
 
-**What you can do:** search and view records; create and update records in the existing vault. When the Mini App is opened from the bot's keyboard button it pushes the new version back to the bot automatically; otherwise it copies an `/update` command for you to send.
+**What you can do:** search and view records; create and update records in the existing vault. Open the Mini App with the bot's keyboard button below the message field — it is the only launch that can push the new version back to the bot automatically (and even that falls back to a copied `/update` command).
 
 **Encryption is client-side, in 3 layers:** record password (`s1.`), whole vault (`VLT2:` — Argon2id), and server at-rest (`SRV1.`).
 
@@ -72,7 +72,7 @@ docker compose up -d
 - The bot token is a credential, not a crypto key.
 
 ### 4. Smoke test
-1. Message the bot `/start` → tap **Refresh database** → copy the vault string.
-2. Open the Mini App → paste the string → enter the passphrase → records appear.
-3. Add or edit a record → the Mini App sends the new version to the bot (or copies an `/update …` command to send manually).
+1. Message the bot `/start` → an **Open Vault** keyboard button appears below the message field; tap **Refresh database** to receive the vault string.
+2. Open the Mini App **from the keyboard button** → enter the passphrase → records appear.
+3. Add or edit a record → the Mini App sends the new version to the bot automatically.
 4. Tap **Refresh database** again → the new version comes back.
