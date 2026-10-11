@@ -4,9 +4,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Telegram bot (long polling) that hosts the Botwheel Vault Mini App.
@@ -27,6 +29,7 @@ public final class BotwheelBot {
     private final TelegramApi api;
     private final VaultStore store;
     private final String seedBlob; // may be null
+    private final Set<Long> menuResetChats = new HashSet<>();
 
     private BotwheelBot(BotConfig config, TelegramApi api, VaultStore store, String seedBlob) {
         this.config = config;
@@ -77,10 +80,10 @@ public final class BotwheelBot {
 
     public void run() throws Exception {
         // The Mini App is reachable ONLY through the reply-keyboard button — the
-        // one launch type that lets it sendData() back to us — so make sure no
-        // web_app menu button lingers next to the input field.
+        // one launch type that lets it sendData() back to us — so point every
+        // menu button at the command list instead of a Web App.
         try {
-            api.setChatMenuButtonDefault();
+            api.setChatMenuButtonCommands(null);
         } catch (Exception e) {
             System.err.println("Could not reset the menu button: " + e.getMessage());
         }
@@ -137,6 +140,7 @@ public final class BotwheelBot {
             api.answerCallbackQuery(callbackId, "403 Forbidden");
             return;
         }
+        ensureMenuReset(chatId);
 
         if ("refresh".equals(data)) {
             api.answerCallbackQuery(callbackId, "Sending your vault…");
@@ -154,6 +158,7 @@ public final class BotwheelBot {
             api.sendMessage(chatId, "403 Forbidden", null);
             return;
         }
+        ensureMenuReset(chatId);
 
         // A vault pushed by the Mini App via Telegram.WebApp.sendData() arrives
         // as a service message; store it like an /update command.
@@ -361,6 +366,22 @@ public final class BotwheelBot {
 
     private boolean isAllowed(long userId) {
         return config.allowedUserIds.isEmpty() || config.allowedUserIds.contains(userId);
+    }
+
+    /**
+     * A per-chat menu button set by an older build overrides the default, so
+     * clear it the first time we see each chat. Telegram has no way to remove
+     * the menu button entirely — this only makes it open the command list.
+     */
+    private void ensureMenuReset(long chatId) {
+        if (!menuResetChats.add(chatId)) {
+            return;
+        }
+        try {
+            api.setChatMenuButtonCommands(chatId);
+        } catch (Exception e) {
+            System.err.println("Could not reset the menu button for chat " + chatId + ": " + e.getMessage());
+        }
     }
 
     private static long chatIdOf(Map<String, Object> message) {

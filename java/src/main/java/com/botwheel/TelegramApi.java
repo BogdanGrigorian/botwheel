@@ -121,14 +121,19 @@ public final class TelegramApi {
     }
 
     /**
-     * Reset the chat menu button to Telegram's default (the bot command list).
-     * The Mini App is reached through the reply-keyboard button instead, because
-     * that is the only launch type that lets it {@code sendData()} back to us.
+     * Point the menu button at the bot's command list instead of a Mini App.
+     * {@code chatId == null} changes the default for all chats; a value resets
+     * that one private chat (which overrides the default). Telegram always has
+     * a menu button — this only changes what pressing it does.
      */
-    public Map<String, Object> setChatMenuButtonDefault() throws IOException, InterruptedException {
+    public Map<String, Object> setChatMenuButtonCommands(Long chatId)
+            throws IOException, InterruptedException {
         Map<String, Object> button = new LinkedHashMap<>();
-        button.put("type", "default");
+        button.put("type", "commands");
         Map<String, Object> params = new LinkedHashMap<>();
+        if (chatId != null) {
+            params.put("chat_id", chatId);
+        }
         params.put("menu_button", button);
         return call("setChatMenuButton", params);
     }
