@@ -99,6 +99,7 @@
           <span class="badge">Botwheel Vault</span>
           <span id="vault-meta" class="vault-meta"></span>
         </div>
+        <button id="add-btn" class="icon-btn" type="button" title="Add record">+</button>
         <button id="lock-btn" class="icon-btn" type="button" title="Lock vault">🔒</button>
       </header>
 
@@ -133,11 +134,13 @@
     <section id="details-screen" class="details-screen" hidden>
       <header class="details-header">
         <button id="details-back" class="icon-btn" type="button" aria-label="Back">←</button>
-        <span class="details-title">Record details</span>
+        <span id="details-title" class="details-title">Record details</span>
+        <span class="details-spacer" aria-hidden="true"></span>
         <span id="details-status" class="details-status" hidden></span>
+        <button id="details-edit" class="mini-btn" type="button">Edit</button>
       </header>
 
-      <div class="details-body">
+      <div id="details-body" class="details-body">
         <div class="detail-field">
           <span class="field-label">Title</span>
           <span id="details-name" class="detail-value detail-name"></span>
@@ -170,6 +173,70 @@
           <span class="field-label">Notes</span>
           <span id="details-notes" class="detail-value detail-notes"></span>
         </div>
+      </div>
+
+      <form id="edit-form" class="details-body edit-form" hidden>
+        <label class="detail-field">
+          <span class="field-label">Title *</span>
+          <input id="edit-name" class="input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+
+        <label class="detail-field">
+          <span class="field-label">Login</span>
+          <input id="edit-login" class="input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+
+        <label class="detail-field">
+          <span class="field-label">Email</span>
+          <input id="edit-email" class="input" type="email" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+
+        <label class="detail-field">
+          <span class="field-label">Password *</span>
+          <div class="secret-row">
+            <input id="edit-password" class="input" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" />
+            <button id="edit-reveal" class="mini-btn" type="button">Show</button>
+          </div>
+        </label>
+
+        <label class="detail-field">
+          <span class="field-label">URL</span>
+          <input id="edit-url" class="input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+
+        <label class="detail-field">
+          <span class="field-label">Notes</span>
+          <textarea id="edit-notes" class="input edit-textarea" rows="3" spellcheck="false"></textarea>
+        </label>
+
+        <div id="edit-error" class="result error" hidden></div>
+
+        <div class="edit-actions">
+          <button id="edit-cancel" class="button button-secondary" type="button">Cancel</button>
+          <button id="edit-save" class="button" type="submit">Save</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Vault updated: hand the new version back to the bot -->
+    <section id="save-screen" class="details-screen" hidden>
+      <header class="details-header">
+        <button id="save-back" class="icon-btn" type="button" aria-label="Back">←</button>
+        <span class="details-title">Vault updated</span>
+      </header>
+
+      <div class="details-body">
+        <p id="save-hint" class="save-hint">Your changes are stored in this browser. To save the new version on the bot, send it the command below — it has already been copied to your clipboard.</p>
+
+        <label class="detail-field">
+          <span class="field-label">Update command</span>
+          <textarea id="save-command" class="textarea save-command" rows="4" readonly spellcheck="false"></textarea>
+        </label>
+
+        <button id="save-send" class="button" type="button" hidden>Send to bot</button>
+        <button id="save-copy" class="button" type="button">Copy command</button>
+
+        <p class="save-note">The bot only stores the encrypted vault — your password never leaves this device.</p>
       </div>
     </section>
 

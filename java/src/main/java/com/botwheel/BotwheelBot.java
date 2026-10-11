@@ -14,9 +14,10 @@ import java.util.Map;
  * The bot does NO client-side encryption/decryption: it only stores the vault
  * transport string per user and hands it back over chat when the user taps
  * "Refresh database" (or sends /refresh). The user then opens the Mini App
- * (menu button / inline button) to unlock it with their password. The stored
- * blob may additionally be wrapped with server-side *at-rest* encryption
- * ({@link AtRestCrypto}); that layer is transparent to the client.
+ * (menu button / inline button) to unlock it with their password. New versions
+ * produced by the Mini App are stored when the user sends /update &lt;blob&gt;.
+ * The stored blob may additionally be wrapped with server-side *at-rest*
+ * encryption ({@link AtRestCrypto}); that layer is transparent to the client.
  */
 public final class BotwheelBot {
 
@@ -77,6 +78,11 @@ public final class BotwheelBot {
     public void run() throws Exception {
         // Host the Mini App via the private-chat menu button.
         api.setChatMenuButtonWebApp("Open Vault", config.miniAppUrl);
+        try {
+            api.setMyCommands(commandList());
+        } catch (Exception e) {
+            System.err.println("Could not register commands: " + e.getMessage());
+        }
         System.out.println("Mini App URL : " + config.miniAppUrl);
         System.out.println("Long polling started — Ctrl+C to stop.");
 
@@ -143,9 +149,17 @@ public final class BotwheelBot {
             return;
         }
 
+        // A vault pushed by the Mini App via Telegram.WebApp.sendData() arrives
+        // as a service message; store it like an /update command.
+        Object webAppData = message.get("web_app_data");
+        if (webAppData != null) {
+            storeVaultUpdate(userId, chatId, Json.str(Json.obj(webAppData).get("data")));
+            return;
+        }
+
         String text = Json.str(message.get("text"));
         if (text == null) {
-            return; // non-text message — upload path is out of scope for now
+            return; // non-text message — nothing else to do
         }
         text = text.trim();
 
@@ -153,8 +167,12 @@ public final class BotwheelBot {
             welcome(userId, chatId);
         } else if (text.startsWith("/refresh")) {
             sendVault(userId, chatId);
+        } else if (text.startsWith("/update")) {
+            storeVaultUpdate(userId, chatId, text.substring("/update".length()));
+        } else if (looksLikeVault(text)) {
+            storeVaultUpdate(userId, chatId, text);
         }
-        // Any other message is ignored: the Mini App -> bot upload is not wired up yet.
+        // Anything else is ignored.
     }
 
     private void welcome(long userId, long chatId) throws Exception {
@@ -162,8 +180,13 @@ public final class BotwheelBot {
         refreshMenuButton(userId, chatId);
         String text = "\uD83D\uDD10 Botwheel Vault\n\n"
                 + "This bot stores your encrypted vault and hands it back to you over chat. "
-                + "Tap \u201CRefresh database\u201D to receive your vault, then open the Mini App to unlock it.";
+                + "Tap \u201CRefresh database\u201D to receive your vault, then open the Mini App to unlock it. "
+                + "When you create or edit records, the Mini App sends the new vault back here automatically.";
         api.sendMessage(chatId, text, mainKeyboard(userId));
+        api.sendMessage(chatId,
+                "Open the vault with the button below to add or edit records \u2014 changes are "
+                        + "sent back to me automatically.",
+                updateKeyboard(userId));
     }
 
     private Map<String, Object> mainKeyboard(long userId) {
@@ -182,14 +205,33 @@ public final class BotwheelBot {
         return markup;
     }
 
+    /**
+     * Reply keyboard with a {@code web_app} button. Launching the Mini App this
+     * way (rather than from an inline/menu button) is what lets it call
+     * {@code Telegram.WebApp.sendData()} to push the vault back to the bot.
+     */
+    private Map<String, Object> updateKeyboard(long userId) {
+        Map<String, Object> webApp = new LinkedHashMap<>();
+        webApp.put("url", miniAppUrl(userId));
+
+        Map<String, Object> button = new LinkedHashMap<>();
+        button.put("text", "Open Vault");
+        button.put("web_app", webApp);
+
+        Map<String, Object> markup = new LinkedHashMap<>();
+        markup.put("keyboard", List.of(List.of(button)));
+        markup.put("resize_keyboard", true);
+        return markup;
+    }
+
     private void sendVault(long userId, long chatId) throws Exception {
         maybeSeed(userId);
         refreshMenuButton(userId, chatId);
         VaultStore.Entry entry = store.get(userId);
         if (entry == null || entry.blob == null || entry.blob.isEmpty()) {
             api.sendMessage(chatId,
-                    "No vault stored yet. Your database will appear here once the Mini App "
-                            + "sends it back (the upload path is not wired up yet).",
+                    "No vault stored yet. Create it in the Mini App, then send the /update "
+                            + "command it copies for you to store it here.",
                     null);
             return;
         }
@@ -209,6 +251,88 @@ public final class BotwheelBot {
         if (seedBlob != null) {
             store.seedIfAbsent(userId, seedBlob);
         }
+    }
+
+    /**
+     * Store a new vault version sent by the Mini App (as "/update &lt;blob&gt;"
+     * or a bare transport string) and bump the user's revision.
+     */
+    private void storeVaultUpdate(long userId, long chatId, String raw) throws Exception {
+        String blob = extractVaultBlob(raw);
+        if (blob == null) {
+            api.sendMessage(chatId,
+                    "Send the vault string produced by the Mini App, e.g.\n/update VLT2:\u2026", null);
+            return;
+        }
+        VaultStore.Entry entry = store.put(userId, blob);
+        refreshMenuButton(userId, chatId);
+        api.sendMessage(chatId,
+                "Vault updated to v" + entry.version + " (" + entry.checksum + "). "
+                        + "Tap \u201CRefresh database\u201D to receive it.", null);
+    }
+
+    /** True if the message already carries a vault transport string. */
+    private static boolean looksLikeVault(String text) {
+        return text.startsWith("VLT2:") || text.startsWith("VLT1:");
+    }
+
+    /**
+     * Pull the transport string out of the argument, tolerating a leading
+     * "/update", surrounding whitespace and trailing text. Requires an 8-hex
+     * checksum suffix so obviously malformed input is rejected.
+     */
+    private static String extractVaultBlob(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.trim();
+        int at = looksLikeVault(s) ? 0 : s.indexOf("VLT2:");
+        if (at < 0) {
+            at = s.indexOf("VLT1:");
+        }
+        if (at < 0) {
+            return null;
+        }
+        s = s.substring(at);
+        for (int i = 0; i < s.length(); i++) {
+            if (Character.isWhitespace(s.charAt(i))) {
+                s = s.substring(0, i);
+                break;
+            }
+        }
+        int dot = s.lastIndexOf('.');
+        if (dot < 0 || s.length() - dot - 1 != 8 || !isHex(s.substring(dot + 1))) {
+            return null;
+        }
+        return s;
+    }
+
+    private static boolean isHex(String s) {
+        if (s.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            if (!hex) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<Map<String, Object>> commandList() {
+        return List.of(
+                command("start", "Show the welcome message"),
+                command("refresh", "Receive your encrypted vault"),
+                command("update", "Store a new vault version (from the Mini App)"));
+    }
+
+    private static Map<String, Object> command(String name, String description) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("command", name);
+        m.put("description", description);
+        return m;
     }
 
     /**

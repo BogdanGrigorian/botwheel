@@ -801,6 +801,10 @@ body {
   word-break: break-word;
 }
 
+.details-spacer {
+  flex: 1;
+}
+
 .details-status {
   margin-left: auto;
   font-family: var(--mono);
@@ -885,6 +889,49 @@ body {
 
 .mini-btn:active {
   transform: scale(0.96);
+}
+
+/* ---------- Record editor ---------- */
+.edit-form .detail-field {
+  gap: 6px;
+}
+
+.edit-form .input {
+  font-size: 14px;
+}
+
+.edit-textarea {
+  resize: vertical;
+  min-height: 70px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.edit-actions .button {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* ---------- Save / hand back to bot ---------- */
+.save-hint,
+.save-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.save-command {
+  margin-bottom: 0;
+}
+
+#save-copy {
+  margin-top: 12px;
 }
 
 /* ---------- Theme switcher ---------- */

@@ -38,6 +38,29 @@ const detailsEmail = document.getElementById("details-email");
 const detailsPassword = document.getElementById("details-password");
 const revealPasswordBtn = document.getElementById("reveal-password");
 
+const detailsTitle = document.getElementById("details-title");
+const detailsBody = document.getElementById("details-body");
+const detailsEditBtn = document.getElementById("details-edit");
+const editForm = document.getElementById("edit-form");
+const editName = document.getElementById("edit-name");
+const editLogin = document.getElementById("edit-login");
+const editEmail = document.getElementById("edit-email");
+const editPassword = document.getElementById("edit-password");
+const editUrl = document.getElementById("edit-url");
+const editNotes = document.getElementById("edit-notes");
+const editError = document.getElementById("edit-error");
+const editCancel = document.getElementById("edit-cancel");
+const editSaveBtn = document.getElementById("edit-save");
+const editRevealBtn = document.getElementById("edit-reveal");
+const addBtn = document.getElementById("add-btn");
+
+const saveScreen = document.getElementById("save-screen");
+const saveBack = document.getElementById("save-back");
+const saveCommand = document.getElementById("save-command");
+const saveCopy = document.getElementById("save-copy");
+const saveSend = document.getElementById("save-send");
+const saveHint = document.getElementById("save-hint");
+
 // --- Telegram Web App integration (safe when running outside Telegram) ---
 const tg = window.Telegram?.WebApp;
 
@@ -68,6 +91,9 @@ const state = {
   kdf: null,     // vault KDF params (from decryptDatabase) for credential keys
   key: null,     // cached credential CryptoKey (derived lazily)
   selected: null, // record id currently shown in the details view
+  editing: false, // details screen is showing the edit form
+  editingId: null, // id of the record being edited (null = creating a new one)
+  nextId: 0,      // next client-side record id
 };
 
 // --- Local cache of the last inserted database ----------------------------
@@ -286,7 +312,30 @@ function buildIndex(entries) {
     };
   });
   records.sort((a, b) => a.lowerN.localeCompare(b.lowerN));
+  state.nextId = records.length;
   state.records = records;
+}
+
+// Keep the denormalised search fields in sync after an edit.
+function recomputeRec(rec) {
+  rec.lowerN = (rec.n || "").toLowerCase();
+  rec.lowerU = (rec.u || "").toLowerCase();
+  rec.lowerO = (rec.o || "").toLowerCase();
+  rec.lowerL = (rec.l || "").toLowerCase();
+  rec.lowerE = (rec.e || "").toLowerCase();
+  rec.first = firstLetter(rec.n);
+}
+
+// Plain database rows (schema v3) ready to be re-encrypted.
+function entriesFromState() {
+  return state.records.map((rec) => ({
+    n: rec.n, u: rec.u, o: rec.o, l: rec.l, e: rec.e, s: rec.s,
+  }));
+}
+
+function updateVaultMeta() {
+  const count = state.records.length;
+  vaultMetaEl.textContent = count + " record" + (count === 1 ? "" : "s");
 }
 
 function enterMainScreen(entries) {
@@ -294,7 +343,7 @@ function enterMainScreen(entries) {
   state.query = "";
   state.letter = null;
   searchInput.value = "";
-  vaultMetaEl.textContent = `${state.records.length} record${state.records.length === 1 ? "" : "s"}`;
+  updateVaultMeta();
   lockScreen.hidden = true;
   mainScreen.hidden = false;
   render();
@@ -310,11 +359,16 @@ function lock() {
   state.kdf = null;
   state.key = null;
   state.selected = null;
+  state.editing = false;
+  state.editingId = null;
   searchInput.value = "";
   passwordInput.value = "";
   updateStrength();
   result.hidden = true;
   detailsScreen.hidden = true;
+  saveScreen.hidden = true;
+  editForm.hidden = true;
+  detailsBody.hidden = false;
   mainScreen.hidden = true;
   lockScreen.hidden = false;
   renderCacheBar();
@@ -459,6 +513,13 @@ async function getCredentialKey() {
 async function openRecord(rec) {
   const id = rec.id;
   state.selected = id;
+  state.editing = false;
+  state.editingId = null;
+  detailsTitle.textContent = "Record details";
+  detailsEditBtn.hidden = false;
+  detailsBody.hidden = false;
+  editForm.hidden = true;
+  saveScreen.hidden = true;
 
   detailsName.textContent = rec.n || "—";
 
@@ -510,9 +571,187 @@ function closeDetails() {
   detailsScreen.hidden = true;
   mainScreen.hidden = false;
   state.selected = null;
+  state.editing = false;
+  state.editingId = null;
+  editForm.hidden = true;
+  detailsBody.hidden = false;
+  saveScreen.hidden = true;
   passwordRevealed = false;
   detailsData = { login: "", email: "", password: "" };
   detailsStatus.hidden = true;
+}
+
+// --- Create / update records ---
+function setEditError(message) {
+  if (!message) {
+    editError.hidden = true;
+    editError.textContent = "";
+    return;
+  }
+  editError.hidden = false;
+  editError.textContent = message;
+}
+
+function setEditBusy(busy) {
+  editSaveBtn.disabled = busy;
+  editCancel.disabled = busy;
+}
+
+async function openEditor(rec) {
+  state.editing = true;
+  state.editingId = rec ? rec.id : null;
+  state.selected = rec ? rec.id : null;
+
+  detailsTitle.textContent = rec ? "Edit record" : "New record";
+  detailsEditBtn.hidden = true;
+  detailsBody.hidden = true;
+  editForm.hidden = false;
+  saveScreen.hidden = true;
+  setEditError("");
+
+  editName.value = rec ? rec.n : "";
+  editLogin.value = rec ? rec.l : "";
+  editEmail.value = rec ? rec.e : "";
+  editUrl.value = rec ? rec.u : "";
+  editNotes.value = rec ? rec.o : "";
+  editPassword.value = "";
+  editPassword.type = "password";
+  editRevealBtn.textContent = "Show";
+
+  mainScreen.hidden = true;
+  detailsScreen.hidden = false;
+  editName.focus();
+
+  if (rec) {
+    // Show the current password so it can be edited (decrypt with the cached key).
+    try {
+      const key = await getCredentialKey();
+      const secret = await window.CryptoCore.decryptWithKey(key, rec.s);
+      const sep = secret.indexOf("\u0000");
+      editPassword.value = sep === -1 ? secret : secret.slice(sep + 1);
+    } catch (err) {
+      setEditError("Could not decrypt the current password — enter it again.");
+    }
+  }
+}
+
+function cancelEditor() {
+  const wasNew = state.editingId === null;
+  state.editing = false;
+  state.editingId = null;
+  editForm.hidden = true;
+  detailsBody.hidden = false;
+  detailsEditBtn.hidden = false;
+  detailsTitle.textContent = "Record details";
+  setEditError("");
+  if (wasNew) closeDetails();
+}
+
+async function saveEditor(e) {
+  e.preventDefault();
+  if (editSaveBtn.disabled) return;
+
+  const n = editName.value.trim();
+  const password = editPassword.value;
+  if (!n) { setEditError("Title is required."); return; }
+  if (!password) { setEditError("Password is required."); return; }
+
+  setEditBusy(true);
+  setEditError("");
+  try {
+    const key = await getCredentialKey();
+    const s = await window.CryptoCore.encryptWithKey(key, password);
+
+    let rec = state.editingId != null
+      ? state.records.find((r) => r.id === state.editingId)
+      : null;
+    if (!rec) {
+      rec = { id: state.nextId++ };
+      state.records.push(rec);
+    }
+    rec.n = n;
+    rec.u = editUrl.value.trim();
+    rec.o = editNotes.value;
+    rec.l = editLogin.value.trim();
+    rec.e = editEmail.value.trim();
+    rec.s = s;
+    recomputeRec(rec);
+
+    // Re-encrypt the whole vault with the SAME salt + KDF so existing records
+    // keep decrypting with the already-derived key.
+    const blob = await window.CryptoCore.encryptDatabase(
+      entriesFromState(), state.password, { salt: state.vaultSalt, kdf: state.kdf });
+
+    // The local cache becomes the revision we hand back to the bot.
+    serverRevision = { c: checksumOf(blob), v: "", t: "" };
+    writeCache(blob);
+    preferredBlob = blob;
+
+    state.records.sort((a, b) => a.lowerN.localeCompare(b.lowerN));
+    state.editing = false;
+    state.editingId = null;
+    editForm.hidden = true;
+    detailsBody.hidden = false;
+    detailsEditBtn.hidden = false;
+    detailsTitle.textContent = "Record details";
+
+    updateVaultMeta();
+    render();
+    await openRecord(rec);
+    showSavePanel(blob);
+  } catch (err) {
+    setEditError("Could not save: " + (err && err.message ? err.message : err));
+  } finally {
+    setEditBusy(false);
+  }
+}
+
+// Telegram.WebApp.sendData() is only available when the Mini App was launched
+// from a reply-keyboard button (such launches carry an empty initData); inline
+// and menu-button launches get initData and must fall back to copy/paste.
+function canSendData() {
+  return !!(tg
+    && typeof tg.sendData === "function"
+    && tg.platform && tg.platform !== "unknown"
+    && !(tg.initData && tg.initData.length));
+}
+
+function sendToBot(cmd) {
+  try {
+    tg.sendData(cmd); // service message the bot stores; closes the Mini App
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function renderSavePanel(cmd) {
+  const canSend = canSendData();
+  saveCommand.value = cmd;
+  saveSend.hidden = !canSend;
+  saveCopy.classList.toggle("button-secondary", canSend);
+  saveCopy.textContent = "Copy command";
+  saveHint.textContent = canSend
+    ? "Couldn\u2019t reach the bot automatically. Tap \u201CSend to bot\u201D to store the new version, or copy the command below."
+    : "Your changes are stored in this browser. To save the new version on the bot, send it the command below \u2014 it has already been copied to your clipboard.";
+  saveScreen.hidden = false;
+  copyText(cmd).then(() => {
+    saveCopy.textContent = "Copied!";
+    setTimeout(() => { saveCopy.textContent = "Copy command"; }, 1500);
+  }).catch(() => {});
+}
+
+function showSavePanel(blob) {
+  const cmd = "/update " + blob;
+  if (canSendData() && sendToBot(cmd)) {
+    // sendData closes the Mini App. If the client ignored it, fall back to the
+    // manual panel a moment later.
+    setTimeout(() => {
+      if (saveScreen.hidden) renderSavePanel(cmd);
+    }, 1000);
+    return;
+  }
+  renderSavePanel(cmd);
 }
 
 async function copyText(text) {
@@ -699,7 +938,43 @@ searchInput.addEventListener("keydown", (e) => {
 clearBtn.addEventListener("click", resetFilter);
 resetBtn.addEventListener("click", resetFilter);
 
-detailsBack.addEventListener("click", closeDetails);
+detailsBack.addEventListener("click", () => {
+  if (state.editing) cancelEditor();
+  else closeDetails();
+});
+
+detailsEditBtn.addEventListener("click", () => {
+  const rec = state.records.find((r) => r.id === state.selected);
+  if (rec) openEditor(rec);
+});
+
+addBtn.addEventListener("click", () => openEditor(null));
+
+editForm.addEventListener("submit", saveEditor);
+editCancel.addEventListener("click", cancelEditor);
+
+editRevealBtn.addEventListener("click", () => {
+  const show = editPassword.type === "password";
+  editPassword.type = show ? "text" : "password";
+  editRevealBtn.textContent = show ? "Hide" : "Show";
+});
+
+saveBack.addEventListener("click", () => {
+  saveScreen.hidden = true;
+});
+
+saveCopy.addEventListener("click", async () => {
+  await copyText(saveCommand.value);
+  saveCopy.textContent = "Copied!";
+  setTimeout(() => { saveCopy.textContent = "Copy command"; }, 1500);
+});
+
+saveSend.addEventListener("click", () => {
+  if (sendToBot(saveCommand.value)) {
+    saveSend.textContent = "Sent!";
+    setTimeout(() => { saveSend.textContent = "Send to bot"; }, 1500);
+  }
+});
 
 revealPasswordBtn.addEventListener("click", () => {
   passwordRevealed = !passwordRevealed;

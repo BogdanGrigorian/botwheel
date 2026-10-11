@@ -146,6 +146,14 @@ public final class TelegramApi {
         return call("setChatMenuButton", params);
     }
 
+    /** Register the bot's command list (shown in the chat's command menu). */
+    public Map<String, Object> setMyCommands(List<Map<String, Object>> commands)
+            throws IOException, InterruptedException {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("commands", commands);
+        return call("setMyCommands", params);
+    }
+
     private static byte[] multipartBody(String boundary, long chatId, String filename, String content) {
         StringBuilder sb = new StringBuilder();
         sb.append("--").append(boundary).append("\r\n");
