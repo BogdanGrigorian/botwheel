@@ -706,14 +706,19 @@ async function saveEditor(e) {
   }
 }
 
-// Telegram.WebApp.sendData() is only available when the Mini App was launched
-// from a reply-keyboard button (such launches carry an empty initData); inline
-// and menu-button launches get initData and must fall back to copy/paste.
+// Telegram.WebApp.sendData() is only delivered when the Mini App was launched
+// from a reply-keyboard button (those launches carry an empty initData and no
+// query_id); inline-button, menu-button and browser launches cannot send.
 function canSendData() {
-  return !!(tg
-    && typeof tg.sendData === "function"
+  return hasSendData()
     && tg.platform && tg.platform !== "unknown"
-    && !(tg.initData && tg.initData.length));
+    && !(tg.initData && tg.initData.length)
+    && !(tg.initDataUnsafe && tg.initDataUnsafe.query_id);
+}
+
+/** The SDK exposes sendData() at all (true even where it cannot be delivered). */
+function hasSendData() {
+  return !!(tg && typeof tg.sendData === "function");
 }
 
 function sendToBot(cmd) {
@@ -726,14 +731,14 @@ function sendToBot(cmd) {
 }
 
 function renderSavePanel(cmd) {
-  const canSend = canSendData();
+  const canSend = hasSendData();
   saveCommand.value = cmd;
   saveSend.hidden = !canSend;
   saveCopy.classList.toggle("button-secondary", canSend);
   saveCopy.textContent = "Copy command";
   saveHint.textContent = canSend
-    ? "Couldn\u2019t reach the bot automatically. Tap \u201CSend to bot\u201D to store the new version, or copy the command below."
-    : "Your changes are stored in this browser. To save the new version on the bot, send it the command below \u2014 it has already been copied to your clipboard.";
+    ? "Tap \u201CSend to bot\u201D to store the new version. Automatic send only works when you open the vault from the keyboard button in the chat \u2014 otherwise copy the command and paste it."
+    : "Your changes are saved in this browser. Copy the command below, paste it into the chat with the bot and send it \u2014 that stores the new version.";
   saveScreen.hidden = false;
   copyText(cmd).then(() => {
     saveCopy.textContent = "Copied!";
@@ -970,10 +975,15 @@ saveCopy.addEventListener("click", async () => {
 });
 
 saveSend.addEventListener("click", () => {
-  if (sendToBot(saveCommand.value)) {
-    saveSend.textContent = "Sent!";
-    setTimeout(() => { saveSend.textContent = "Send to bot"; }, 1500);
+  if (!hasSendData()) return;
+  try {
+    tg.sendData(saveCommand.value);
+  } catch (e) {
+    saveHint.textContent = "This client refused the automatic send \u2014 copy the command and paste it into the chat instead.";
+    return;
   }
+  saveSend.textContent = "Sent!";
+  setTimeout(() => { saveSend.textContent = "Send to bot"; }, 1500);
 });
 
 revealPasswordBtn.addEventListener("click", () => {
