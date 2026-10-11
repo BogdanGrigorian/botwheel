@@ -7,7 +7,6 @@ const lockForm = document.getElementById("lock-form");
 const pasteField = document.getElementById("paste-field");
 const pasteArea = document.getElementById("paste-area");
 const result = document.getElementById("result");
-const userInfo = document.getElementById("user-info");
 
 const lockScreen = document.getElementById("lock-screen");
 const mainScreen = document.getElementById("main-screen");
@@ -43,15 +42,6 @@ if (tg) {
   // Match Telegram's native theme
   tg.setHeaderColor(tg.themeParams.bg_color || "#17212b");
   tg.setBackgroundColor(tg.themeParams.bg_color || "#0e1621");
-
-  const user = tg.initDataUnsafe?.user;
-  if (user) {
-    userInfo.textContent = `Logged in as ${user.first_name || "user"} (@${user.username || "no username"})`;
-  } else {
-    userInfo.textContent = "Running inside Telegram (user data unavailable).";
-  }
-} else {
-  userInfo.textContent = "Running in a browser — open this app through your Telegram bot to get full integration.";
 }
 
 // Prefill the username from Telegram (used only to give password managers a
@@ -158,7 +148,6 @@ function enterMainScreen(entries) {
   state.letter = null;
   searchInput.value = "";
   vaultMetaEl.textContent = `${state.records.length} record${state.records.length === 1 ? "" : "s"}`;
-  userInfo.hidden = true;
   lockScreen.hidden = true;
   mainScreen.hidden = false;
   render();
@@ -179,7 +168,6 @@ function lock() {
   detailsScreen.hidden = true;
   mainScreen.hidden = true;
   lockScreen.hidden = false;
-  userInfo.hidden = false;
 }
 
 // --- Rendering ---
@@ -531,4 +519,32 @@ detailsEmail.addEventListener("click", async () => {
 detailsPassword.addEventListener("click", async () => {
   await copyText(detailsData.password);
   flashStatus();
+});
+
+// --- Theme switcher ---
+const THEME_KEY = "botwheel-theme";
+const themeButtons = document.querySelectorAll(".theme-btn");
+
+function applyTheme(name) {
+  document.documentElement.setAttribute("data-theme", name);
+  try {
+    localStorage.setItem(THEME_KEY, name);
+  } catch (e) {
+    // storage unavailable — theme applies for this session only
+  }
+  themeButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.themeValue === name);
+  });
+}
+
+(function initTheme() {
+  let saved = "default";
+  try {
+    saved = localStorage.getItem(THEME_KEY) || "default";
+  } catch (e) {}
+  applyTheme(saved);
+})();
+
+themeButtons.forEach((btn) => {
+  btn.addEventListener("click", () => applyTheme(btn.dataset.themeValue));
 });

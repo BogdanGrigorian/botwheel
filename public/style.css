@@ -1,4 +1,42 @@
 :root {
+  /* Default theme — original blue scheme */
+  --bg: #0e1621;
+  --card: #17212b;
+  --card-border: #232e3c;
+  --accent: #2aabee;
+  --accent-glow: rgba(42, 171, 238, 0.35);
+  --brass: #2aabee;
+  --brass-hi: #6ec6ff;
+  --teal: #2aabee;
+  --amber: #ff9e00;
+  --error: #f36b6b;
+  --text: #f5f5f5;
+  --text-muted: #8b98a9;
+  --frame: #232e3c;
+  --card-outline: transparent;
+  --card-glow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  --title-glow: none;
+  --on-accent: #ffffff;
+  --btn-bg: #2aabee;
+  --btn-edge: transparent;
+  --btn-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  --badge-fg: #2aabee;
+  --badge-bg: rgba(42, 171, 238, 0.1);
+  --badge-border: rgba(42, 171, 238, 0.4);
+  --badge-glow: none;
+  --focus-glow: 0 0 0 rgba(0, 0, 0, 0);
+  --ta-fg: #f5f5f5;
+  --ta-bg: #0e1621;
+  --ta-border: #232e3c;
+  --ta-ring: rgba(42, 171, 238, 0.35);
+  --ta-glow: 0 0 0 rgba(0, 0, 0, 0);
+  --divider: #232e3c;
+  --result-bg: #0e1621;
+  --mono: "SF Mono", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  --display: "Futura", "Avenir Next", "Century Gothic", Poppins, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+[data-theme="prey"] {
   --bg: #0b1116;
   --card: #131c24;
   --card-border: #2a3540;
@@ -11,8 +49,61 @@
   --error: #e2695a;
   --text: #f3ead2;
   --text-muted: #8f978f;
-  --mono: "SF Mono", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-  --display: "Futura", "Avenir Next", "Century Gothic", Poppins, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --frame: #c8a45c;
+  --card-outline: rgba(200, 164, 92, 0.22);
+  --card-glow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  --title-glow: none;
+  --on-accent: #221806;
+  --btn-bg: linear-gradient(180deg, #e8c97a 0%, #c8a45c 100%);
+  --btn-edge: rgba(0, 0, 0, 0.35);
+  --btn-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 4px 14px rgba(200, 164, 92, 0.22);
+  --badge-fg: #e8c97a;
+  --badge-bg: rgba(200, 164, 92, 0.08);
+  --badge-border: rgba(200, 164, 92, 0.45);
+  --badge-glow: none;
+  --focus-glow: 0 0 0 rgba(0, 0, 0, 0);
+  --ta-fg: #3fc6cd;
+  --ta-bg: rgba(11, 26, 28, 0.55);
+  --ta-border: rgba(63, 198, 205, 0.35);
+  --ta-ring: rgba(63, 198, 205, 0.18);
+  --ta-glow: 0 0 0 rgba(0, 0, 0, 0);
+  --divider: rgba(200, 164, 92, 0.25);
+  --result-bg: rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="retro"] {
+  --bg: #060210;
+  --card: #150a28;
+  --card-border: #3a1f5c;
+  --accent: #ff2a6d;
+  --accent-glow: rgba(255, 42, 109, 0.35);
+  --brass: #ff2a6d;
+  --brass-hi: #ff6ac1;
+  --teal: #00e5ff;
+  --amber: #ff9e00;
+  --error: #ff3355;
+  --text: #f4ecff;
+  --text-muted: #9d8bb5;
+  --frame: #ff2a6d;
+  --card-outline: rgba(255, 42, 109, 0.4);
+  --card-glow: 0 0 40px rgba(255, 42, 109, 0.25), 0 20px 60px rgba(0, 0, 0, 0.6);
+  --title-glow: 0 0 14px rgba(255, 42, 109, 0.6), 0 0 3px rgba(255, 106, 193, 0.9);
+  --on-accent: #14000f;
+  --btn-bg: #ff2a6d;
+  --btn-edge: #ff6ac1;
+  --btn-shadow: 0 0 20px rgba(255, 42, 109, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -8px 14px rgba(80, 0, 40, 0.45);
+  --badge-fg: #00e5ff;
+  --badge-bg: rgba(0, 229, 255, 0.08);
+  --badge-border: rgba(0, 229, 255, 0.5);
+  --badge-glow: 0 0 8px rgba(0, 229, 255, 0.6);
+  --focus-glow: 0 0 14px rgba(255, 42, 109, 0.4);
+  --ta-fg: #00e5ff;
+  --ta-bg: rgba(0, 20, 26, 0.6);
+  --ta-border: rgba(0, 229, 255, 0.4);
+  --ta-ring: rgba(0, 229, 255, 0.2);
+  --ta-glow: 0 0 16px rgba(0, 229, 255, 0.3);
+  --divider: rgba(255, 42, 109, 0.35);
+  --result-bg: rgba(0, 0, 0, 0.25);
 }
 
 * {
@@ -24,70 +115,146 @@
 body {
   min-height: 100dvh;
   display: flex;
+  align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 50% 15%, #16242f 0%, var(--bg) 70%);
+  background: var(--bg);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
 
+[data-theme="default"] body,
+[data-theme="prey"] body {
+  background: radial-gradient(circle at 50% 20%, var(--card) 0%, var(--bg) 70%);
+}
+
 .app {
   width: 100%;
   max-width: 560px;
-  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   text-align: center;
+  position: relative;
+  z-index: 1;
+}
+
+/* Synthwave backdrop: dusk sky, striped sun, neon-rimmed ridges, perspective grid. */
+.backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(120, 160, 255, 0.04) 0px, rgba(120, 160, 255, 0.04) 1px, transparent 1px, transparent 4px),
+    linear-gradient(180deg, #030614 0%, #071430 40%, #0a1a44 52%, #140b36 100%);
+}
+
+[data-theme="retro"] .backdrop {
+  display: block;
+}
+
+.backdrop-glow {
+  position: absolute;
+  left: 50%;
+  top: 20%;
+  width: 90%;
+  height: 40%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at 50% 60%, rgba(0, 175, 255, 0.6) 0%, rgba(0, 120, 255, 0.28) 45%, transparent 72%);
+  z-index: 1;
+}
+
+.backdrop-grid {
+  position: absolute;
+  bottom: -4%;
+  left: -70%;
+  width: 240%;
+  height: 50%;
+  transform: perspective(55vh) rotateX(52deg);
+  transform-origin: 50% 0;
+  background:
+    linear-gradient(rgba(255, 42, 109, 0.55) 1.5px, transparent 1.5px) 0 0 / 30px 20px,
+    linear-gradient(90deg, rgba(255, 42, 109, 0.55) 1.5px, transparent 1.5px) 0 0 / 30px 20px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 38%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 38%);
+  z-index: 2;
+}
+
+.backdrop-mountains {
+  position: absolute;
+  left: -5%;
+  right: -5%;
+  bottom: 46%;
+  height: 26%;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 24, 64, 0.4) 0px, rgba(0, 24, 64, 0.4) 1.5px, transparent 1.5px, transparent 18px),
+    repeating-linear-gradient(60deg, rgba(0, 24, 64, 0.4) 0px, rgba(0, 24, 64, 0.4) 1.5px, transparent 1.5px, transparent 26px),
+    repeating-linear-gradient(120deg, rgba(0, 24, 64, 0.4) 0px, rgba(0, 24, 64, 0.4) 1.5px, transparent 1.5px, transparent 26px),
+    linear-gradient(180deg, #00d5ff 0%, #0080ff 55%, #004080 100%);
+  clip-path: polygon(0 100%, 0 62%, 7% 44%, 14% 60%, 21% 36%, 28% 55%, 35% 26%, 42% 50%, 49% 18%, 56% 46%, 63% 30%, 70% 52%, 77% 38%, 84% 58%, 91% 42%, 100% 64%, 100% 100%);
+  filter: drop-shadow(0 0 14px rgba(0, 190, 255, 0.5));
+  z-index: 3;
 }
 
 .card {
   width: 100%;
   background: var(--card);
-  border: 1px solid var(--brass);
+  border: 1px solid var(--frame);
   border-radius: 6px;
-  outline: 1px solid rgba(200, 164, 92, 0.22);
+  outline: 1px solid var(--card-outline);
   outline-offset: -6px;
-  padding: 36px 28px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  padding: 22px 18px;
+  box-shadow: var(--card-glow);
   margin: auto;
   max-width: 420px;
+  position: relative;
+}
+
+[data-theme="retro"] .card {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0px, rgba(255, 255, 255, 0.025) 1px, transparent 1px, transparent 3px),
+    var(--card);
 }
 
 .badge {
   display: inline-block;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 2px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
-  color: var(--brass-hi);
-  background: rgba(200, 164, 92, 0.08);
-  border: 1px solid rgba(200, 164, 92, 0.45);
+  color: var(--badge-fg);
+  background: var(--badge-bg);
+  border: 1px solid var(--badge-border);
   border-radius: 2px;
-  padding: 5px 14px;
-  margin-bottom: 20px;
+  padding: 3px 10px;
+  margin-bottom: 12px;
+  text-shadow: var(--badge-glow);
 }
 
 .title {
   font-family: var(--display);
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  text-shadow: var(--title-glow);
 }
 
 .subtitle {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.5px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .rule {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 0 0 22px;
+  gap: 8px;
+  margin: 0 0 14px;
 }
 
 .rule::before,
@@ -111,17 +278,17 @@ body {
 .field {
   display: block;
   text-align: left;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .field-label {
   display: block;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 1.5px;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 /* Keep a username field for the OS password manager, but hide it from the UI.
@@ -142,48 +309,48 @@ body {
   border: 1px solid var(--card-border);
   border-radius: 4px;
   color: var(--text);
-  font-size: 16px;
-  padding: 14px 16px;
+  font-size: 15px;
+  padding: 11px 13px;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .input:focus {
   border-color: var(--brass);
-  box-shadow: 0 0 0 3px var(--accent-glow);
+  box-shadow: 0 0 0 3px var(--accent-glow), var(--focus-glow);
 }
 
 .textarea {
   resize: vertical;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
   word-break: break-all;
-  margin-bottom: 12px;
-  color: var(--teal);
-  background: rgba(11, 26, 28, 0.55);
-  border-color: rgba(63, 198, 205, 0.35);
+  margin-bottom: 8px;
+  color: var(--ta-fg);
+  background: var(--ta-bg);
+  border-color: var(--ta-border);
 }
 
 .textarea:focus {
   border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(63, 198, 205, 0.18);
+  box-shadow: 0 0 0 3px var(--ta-ring), var(--ta-glow);
 }
 
 .button {
   width: 100%;
-  background: linear-gradient(180deg, var(--brass-hi) 0%, var(--brass) 100%);
-  color: #221806;
-  border: 1px solid rgba(0, 0, 0, 0.35);
+  background: var(--btn-bg);
+  color: var(--on-accent);
+  border: 1px solid var(--btn-edge);
   border-radius: 4px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 1px;
   text-transform: uppercase;
-  padding: 14px 16px;
+  padding: 12px 16px;
   cursor: pointer;
-  margin-bottom: 16px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 4px 14px rgba(200, 164, 92, 0.22);
+  margin-bottom: 12px;
+  box-shadow: var(--btn-shadow);
   transition: filter 0.15s ease, transform 0.05s ease;
 }
 
@@ -198,20 +365,20 @@ body {
 }
 
 .button-secondary {
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid var(--brass);
-  color: var(--brass-hi);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--teal);
+  color: var(--teal);
 }
 
 .result {
   margin-top: 4px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--result-bg);
   border: 1px solid var(--card-border);
   border-left: 3px solid var(--brass);
   border-radius: 4px;
-  padding: 12px 16px;
+  padding: 10px 12px;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 12px;
   text-align: left;
   word-break: break-word;
 }
@@ -227,25 +394,45 @@ body {
 }
 
 .user-info {
-  margin-top: 16px;
-  font-size: 13px;
+  margin-top: 12px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f4eee0;
-    --card: #fffaf0;
-    --card-border: #d8c9a3;
-    --accent: #9a7628;
-    --accent-glow: rgba(154, 118, 40, 0.2);
-    --brass: #9a7628;
-    --brass-hi: #c39b45;
-    --teal: #18868c;
+    --bg: #e7ecf1;
+    --card: #ffffff;
+    --card-border: #d9e1e8;
+    --accent: #1f8fd6;
+    --accent-glow: rgba(31, 143, 214, 0.2);
+    --brass: #1f8fd6;
+    --brass-hi: #5db4ee;
+    --teal: #1f8fd6;
     --amber: #c77e1e;
-    --error: #b64e3c;
-    --text: #1c1a14;
-    --text-muted: #7a7260;
+    --error: #c94f3d;
+    --text: #17212b;
+    --text-muted: #6b7886;
+    --frame: #d9e1e8;
+    --card-outline: transparent;
+    --card-glow: 0 20px 60px rgba(0, 0, 0, 0.18);
+    --title-glow: none;
+    --on-accent: #ffffff;
+    --btn-bg: #1f8fd6;
+    --btn-edge: transparent;
+    --btn-shadow: 0 0 0 rgba(0, 0, 0, 0);
+    --badge-fg: #1f8fd6;
+    --badge-bg: rgba(31, 143, 214, 0.1);
+    --badge-border: rgba(31, 143, 214, 0.4);
+    --badge-glow: none;
+    --focus-glow: 0 0 0 rgba(0, 0, 0, 0);
+    --ta-fg: #17212b;
+    --ta-bg: #e7ecf1;
+    --ta-border: #d9e1e8;
+    --ta-ring: rgba(31, 143, 214, 0.2);
+    --ta-glow: 0 0 0 rgba(0, 0, 0, 0);
+    --divider: #d9e1e8;
+    --result-bg: #e7ecf1;
   }
 }
 
@@ -264,6 +451,10 @@ body {
   min-height: 100dvh;
 }
 
+[data-theme="retro"] .main-screen {
+  background: linear-gradient(180deg, rgba(6, 2, 16, 0.92) 0%, rgba(6, 2, 16, 0.6) 45%, rgba(6, 2, 16, 0.15) 100%);
+}
+
 .main-header {
   display: flex;
   align-items: center;
@@ -271,7 +462,7 @@ body {
   gap: 12px;
   padding: 16px 16px 10px;
   padding-top: calc(16px + env(safe-area-inset-top));
-  border-bottom: 1px solid rgba(200, 164, 92, 0.25);
+  border-bottom: 1px solid var(--divider);
 }
 
 .main-title {
@@ -292,7 +483,7 @@ body {
 
 .icon-btn {
   background: var(--card);
-  border: 1px solid var(--brass);
+  border: 1px solid var(--frame);
   color: var(--text);
   border-radius: 4px;
   font-size: 18px;
@@ -428,13 +619,13 @@ body {
 
 .strip-letter:active {
   background: var(--brass);
-  color: #221806;
+  color: var(--on-accent);
   border-color: var(--brass);
 }
 
 .strip-letter.active {
   background: var(--brass);
-  color: #221806;
+  color: var(--on-accent);
   border-color: var(--brass);
 }
 
@@ -498,6 +689,10 @@ body {
   text-align: left;
   background: var(--bg);
   min-height: 100dvh;
+}
+
+[data-theme="retro"] .details-screen {
+  background: linear-gradient(180deg, rgba(6, 2, 16, 0.92) 0%, rgba(6, 2, 16, 0.55) 100%);
 }
 
 .details-header {
@@ -598,6 +793,53 @@ body {
 
 .mini-btn:active {
   transform: scale(0.96);
+}
+
+/* ---------- Theme switcher ---------- */
+.theme-switcher {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+}
+
+.theme-btn {
+  width: 30px;
+  height: 30px;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--frame);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.theme-btn.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.theme-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+}
+
+.preview-default {
+  background: linear-gradient(135deg, #0e1621 0%, #17212b 50%, #2aabee 100%);
+}
+
+.preview-prey {
+  background: linear-gradient(135deg, #0b1116 0%, #131c24 50%, #c8a45c 100%);
+}
+
+.preview-retro {
+  background: linear-gradient(135deg, #060210 0%, #150a28 50%, #ff2a6d 100%);
 }
 
 
