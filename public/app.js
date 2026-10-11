@@ -173,11 +173,14 @@ function cacheStatus(cached) {
   return "unknown";
 }
 
-function initCache() {
-  serverRevision = readUrlRevision();
+function renderCacheBar() {
   const cached = readCache();
   const status = cacheStatus(cached);
-  if (status === "none") return;
+  if (status === "none") {
+    cacheBar.hidden = true;
+    preferredBlob = "";
+    return;
+  }
 
   cacheBar.classList.toggle("stale", status === "stale");
   cacheBar.hidden = false;
@@ -188,6 +191,7 @@ function initCache() {
     cacheText.innerHTML = "Cached" + (ts ? " " + escapeHtml(ts) : "") +
       ', <span class="cache-verified">verified</span>';
   } else if (status === "stale") {
+    preferredBlob = "";
     cacheText.innerHTML = "Cached " + escapeHtml(fmtStamp(cached.t || cached.savedAt)) +
       ', <span class="cache-unverified">outdated</span> — tap “Refresh database”';
     pasteField.hidden = false;
@@ -195,6 +199,11 @@ function initCache() {
     preferredBlob = cached.blob;
     cacheText.innerHTML = 'Cached, <span class="cache-unverified">unverified</span>';
   }
+}
+
+function initCache() {
+  serverRevision = readUrlRevision();
+  renderCacheBar();
 }
 
 // --- Helpers ---
@@ -302,6 +311,7 @@ function lock() {
   detailsScreen.hidden = true;
   mainScreen.hidden = true;
   lockScreen.hidden = false;
+  renderCacheBar();
 }
 
 // --- Rendering ---
