@@ -763,12 +763,12 @@ function sendToBot(cmd) {
 function renderSavePanel(cmd) {
   const canAuto = canSendData();
   saveCommand.value = cmd;
-  saveSend.hidden = !hasSendData();
-  saveCopy.classList.toggle("button-secondary", hasSendData());
+  saveSend.hidden = !canAuto;
+  saveCopy.classList.toggle("button-secondary", canAuto);
   saveCopy.textContent = "Copy command";
   saveHint.textContent = canAuto
     ? "Tap \u201CSend to bot\u201D to store the new version, or copy the command and paste it into the chat."
-    : "Saved in this browser \u2014 not stored on the bot yet. Tap \u201CCopy command\u201D and paste it into the chat, or reopen the vault from the keyboard button in the chat to send it automatically.";
+    : "Saved in this browser \u2014 not stored on the bot yet. Telegram only delivers the vault when the Mini App is opened from the keyboard button in the chat, so tap \u201CCopy command\u201D and paste it there, or reopen the vault from that keyboard button to send it automatically.";
   saveScreen.hidden = false;
   copyText(cmd).then(() => {
     saveCopy.textContent = "Copied!";
@@ -1008,7 +1008,7 @@ saveCopy.addEventListener("click", async () => {
 });
 
 saveSend.addEventListener("click", () => {
-  if (!hasSendData()) return;
+  if (!canSendData()) return;
   try {
     tg.sendData(saveCommand.value);
   } catch (e) {
@@ -1017,7 +1017,14 @@ saveSend.addEventListener("click", () => {
   }
   clearPending();
   saveSend.textContent = "Sent!";
-  setTimeout(() => { saveSend.textContent = "Send to bot"; }, 1500);
+  // sendData closes the Mini App. If it is still open a moment later the client
+  // almost certainly ignored it (e.g. inline/menu-button launch).
+  setTimeout(() => {
+    saveSend.textContent = "Send to bot";
+    if (document.visibilityState === "visible") {
+      saveHint.textContent = "The client didn\u2019t hand the update to the bot. Open the vault from the keyboard button in the chat, or copy the command and paste it into the chat.";
+    }
+  }, 1200);
 });
 
 revealPasswordBtn.addEventListener("click", () => {
