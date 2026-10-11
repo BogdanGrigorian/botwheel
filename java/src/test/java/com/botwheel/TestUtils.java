@@ -76,7 +76,7 @@ public final class TestUtils {
      */
     public static Created createRecords(int n, String password) throws Exception {
         byte[] salt = CryptoCore.randomBytes(CryptoCore.SALT_BYTES);
-        SecretKeySpec key = CryptoCore.deriveKey(password, salt, CryptoCore.DEFAULT_ITERATIONS);
+        SecretKeySpec key = CryptoCore.deriveKey(password, salt, CryptoCore.KdfParams.DEFAULT_ARGON2);
 
         List<CryptoCore.Entry> entries = new ArrayList<>();
         for (int i = 0; i < n; i++) {
@@ -101,7 +101,7 @@ public final class TestUtils {
      */
     public static Created createDemoRecords(String password) throws Exception {
         byte[] salt = CryptoCore.randomBytes(CryptoCore.SALT_BYTES);
-        SecretKeySpec key = CryptoCore.deriveKey(password, salt, CryptoCore.DEFAULT_ITERATIONS);
+        SecretKeySpec key = CryptoCore.deriveKey(password, salt, CryptoCore.KdfParams.DEFAULT_ARGON2);
 
         List<CryptoCore.Entry> entries = new ArrayList<>();
         for (String[] row : DEMO_RECORDS) {
@@ -119,7 +119,10 @@ public final class TestUtils {
         int n = args.length > 0 ? Integer.parseInt(args[0]) : 0;
 
         System.out.println("USER_PASSWORD  : \"" + USER_PASSWORD + "\"");
-        System.out.println("PBKDF2 iters   : " + CryptoCore.DEFAULT_ITERATIONS);
+        System.out.println("KDF            : Argon2id "
+                + "(memory=" + CryptoCore.KdfParams.DEFAULT_ARGON2.memoryKiB + " KiB, "
+                + "iterations=" + CryptoCore.KdfParams.DEFAULT_ARGON2.iterations + ", "
+                + "parallelism=" + CryptoCore.KdfParams.DEFAULT_ARGON2.parallelism + ")");
         System.out.println(n > 0
                 ? "Records        : " + n
                 : "Records        : " + DEMO_RECORDS.length + " (demo set)");
@@ -145,7 +148,7 @@ public final class TestUtils {
 
         // 3) The transport string
         String blob = CryptoCore.encryptDatabase(
-                created.entries, USER_PASSWORD, created.salt, CryptoCore.DEFAULT_ITERATIONS);
+                created.entries, USER_PASSWORD, created.salt, CryptoCore.KdfParams.DEFAULT_ARGON2);
         System.out.println("VAULT BLOB (" + blob.length() + " chars):");
         System.out.println(blob);
         System.out.println();
@@ -156,7 +159,7 @@ public final class TestUtils {
         // 4) Round-trip verification
         CryptoCore.Vault vault = CryptoCore.decryptDatabase(blob, USER_PASSWORD);
         List<CryptoCore.DecryptedEntry> decrypted =
-                CryptoCore.decryptEntries(vault.entries, USER_PASSWORD, vault.salt);
+                CryptoCore.decryptEntries(vault.entries, USER_PASSWORD, vault.salt, vault.kdf);
         System.out.println("Round-trip OK  : " + decrypted.size() + " entries decrypted");
         System.out.println("First 3 decoded:");
         for (int i = 0; i < Math.min(3, decrypted.size()); i++) {

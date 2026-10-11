@@ -15,7 +15,14 @@
  * Formats:
  *   Field (self-contained):  "s1.<base64url(salt || iv || ct || tag)>"
  *   Field (with key):        "s1.<base64url(iv || ct || tag)>"
- *   Vault (transport):       "VLT1:<base64url(salt || iv || ct || tag)>.<8-hex-checksum>"
+ *   Vault (transport):       "VLT2:<base64url(header || salt || iv || ct || tag)>.<8-hex-checksum>"
+ *   Vault (legacy):          "VLT1:<base64url(salt || iv || ct || tag)>.<8-hex-checksum>"
+ *
+ * The VLT2 header (13 bytes, little-endian) self-describes the KDF so old and
+ * new vaults coexist:
+ *   id(1) || p1(4) || p2(4) || p3(4)
+ *   kdf "argon2id": p1 = memory KiB, p2 = iterations, p3 = parallelism
+ *   kdf "pbkdf2"  : p1 = iterations (p2/p3 unused)
  */
 
 (function (global) {
@@ -25,9 +32,17 @@
   // Constants
   // -------------------------------------------------------------------------
 
-  var DEFAULT_ITERATIONS = 600000; // PBKDF2-SHA256 rounds (OWASP recommendation)
-  var SALT_BYTES = 16;             // PBKDF2 salt
+  var DEFAULT_ITERATIONS = 600000; // PBKDF2-SHA256 rounds (legacy VLT1)
+  var SALT_BYTES = 16;             // PBKDF2/Argon2 salt
   var IV_BYTES = 12;               // AES-GCM nonce (96-bit)
+
+  // KDF identifiers + defaults for the self-describing VLT2 header.
+  var KDF_PBKDF2 = 1;
+  var KDF_ARGON2ID = 2;
+  var HEADER_BYTES = 13;           // id(1) || p1(4) || p2(4) || p3(4)
+  var DEFAULT_ARGON2 = { memoryKiB: 65536, iterations: 3, parallelism: 1 };
+  // Vendored Argon2 WASM (hash-wasm, MIT); loaded lazily on first use.
+  var ARGON2_SCRIPT = 'vendor/argon2.umd.min.js';
 
   var encoder = new TextEncoder();
   var decoder = new TextDecoder();
@@ -103,8 +118,75 @@
   // Key derivation + AES-GCM
   // -------------------------------------------------------------------------
 
-  /** Derive a 256-bit AES-GCM CryptoKey from a password + salt. */
-  async function deriveKey(password, salt, iterations) {
+  // -------------------------------------------------------------------------
+  // Key derivation: Argon2id (memory-hard, default) or PBKDF2 (legacy VLT1)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Normalise a KDF spec. Accepts:
+   *   undefined/null -> Argon2id with DEFAULT_ARGON2
+   *   a number       -> PBKDF2 with that many iterations
+   *   { id:'pbkdf2', iterations }
+   *   { id:'argon2id', memoryKiB, iterations, parallelism }
+   */
+  function normalizeKdf(params) {
+    if (params == null) {
+      return {
+        id: 'argon2id',
+        memoryKiB: DEFAULT_ARGON2.memoryKiB,
+        iterations: DEFAULT_ARGON2.iterations,
+        parallelism: DEFAULT_ARGON2.parallelism,
+      };
+    }
+    if (typeof params === 'number') {
+      return { id: 'pbkdf2', iterations: params };
+    }
+    if (params.id === 'pbkdf2') {
+      return { id: 'pbkdf2', iterations: params.iterations || DEFAULT_ITERATIONS };
+    }
+    if (params.id === 'argon2id' || params.memoryKiB) {
+      return {
+        id: 'argon2id',
+        memoryKiB: params.memoryKiB || DEFAULT_ARGON2.memoryKiB,
+        iterations: params.iterations || DEFAULT_ARGON2.iterations,
+        parallelism: params.parallelism || DEFAULT_ARGON2.parallelism,
+      };
+    }
+    return { id: 'pbkdf2', iterations: params.iterations || DEFAULT_ITERATIONS };
+  }
+
+  var argon2Library = null;
+
+  /** Lazily load the vendored Argon2 WASM library (only when first needed). */
+  function ensureArgon2() {
+    if (global.hashwasm && global.hashwasm.argon2id) {
+      return Promise.resolve(global.hashwasm);
+    }
+    if (argon2Library) {
+      return argon2Library;
+    }
+    argon2Library = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = ARGON2_SCRIPT;
+      script.onload = function () {
+        if (global.hashwasm && global.hashwasm.argon2id) {
+          resolve(global.hashwasm);
+        } else {
+          argon2Library = null;
+          reject(new Error('argon2: ' + ARGON2_SCRIPT + ' loaded but hashwasm.argon2id is missing'));
+        }
+      };
+      script.onerror = function () {
+        argon2Library = null;
+        reject(new Error('argon2: could not load ' + ARGON2_SCRIPT));
+      };
+      document.head.appendChild(script);
+    });
+    return argon2Library;
+  }
+
+  /** PBKDF2-SHA256 -> AES-256 CryptoKey (legacy VLT1 path). */
+  async function deriveKeyPbkdf2(password, salt, iterations) {
     var rounds = iterations || DEFAULT_ITERATIONS;
     var base = await crypto.subtle.importKey(
       'raw', encoder.encode(password), 'PBKDF2', false, ['deriveKey']
@@ -116,6 +198,75 @@
       false,
       ['encrypt', 'decrypt']
     );
+  }
+
+  /** Argon2id (WASM) -> AES-256 CryptoKey. */
+  async function deriveKeyArgon2(password, salt, p) {
+    var hw = await ensureArgon2();
+    var raw = await hw.argon2id({
+      password: password,
+      salt: salt,
+      parallelism: p.parallelism,
+      iterations: p.iterations,
+      memorySize: p.memoryKiB,
+      hashLength: 32,
+      outputType: 'binary',
+    });
+    if (!(raw instanceof Uint8Array)) {
+      raw = new Uint8Array(raw);
+    }
+    return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  }
+
+  /**
+   * Derive a 256-bit AES-GCM CryptoKey from a password + salt.
+   * See {@link normalizeKdf} for the accepted parameter shapes.
+   */
+  async function deriveKey(password, salt, params) {
+    var p = normalizeKdf(params);
+    if (p.id === 'argon2id') {
+      return deriveKeyArgon2(password, salt, p);
+    }
+    return deriveKeyPbkdf2(password, salt, p.iterations);
+  }
+
+  // --- Self-describing KDF header (VLT2), 13 bytes, little-endian ---
+
+  function writeU32(buf, off, val) {
+    buf[off] = val & 0xff;
+    buf[off + 1] = (val >>> 8) & 0xff;
+    buf[off + 2] = (val >>> 16) & 0xff;
+    buf[off + 3] = (val >>> 24) & 0xff;
+  }
+
+  function readU32(buf, off) {
+    return (buf[off] | (buf[off + 1] << 8) | (buf[off + 2] << 16) | (buf[off + 3] << 24)) >>> 0;
+  }
+
+  /** id(1) || p1(4) || p2(4) || p3(4); semantics depend on the KDF id. */
+  function encodeKdfHeader(p) {
+    var b = new Uint8Array(HEADER_BYTES);
+    if (p.id === 'argon2id') {
+      b[0] = KDF_ARGON2ID;
+      writeU32(b, 1, p.memoryKiB);
+      writeU32(b, 5, p.iterations);
+      writeU32(b, 9, p.parallelism);
+    } else {
+      b[0] = KDF_PBKDF2;
+      writeU32(b, 1, p.iterations);
+    }
+    return b;
+  }
+
+  function decodeKdfHeader(b) {
+    var id = b[0];
+    if (id === KDF_ARGON2ID) {
+      return { id: 'argon2id', memoryKiB: readU32(b, 1), iterations: readU32(b, 5), parallelism: readU32(b, 9) };
+    }
+    if (id === KDF_PBKDF2) {
+      return { id: 'pbkdf2', iterations: readU32(b, 1) };
+    }
+    throw new Error('decryptDatabase: unknown KDF id ' + id);
   }
 
   /** AES-256-GCM encrypt. Returns Uint8Array(iv || ciphertext || tag). */
@@ -198,31 +349,37 @@
 
   /**
    * Encrypt the whole (plain) database into one transport string.
-   * Pipeline: JSON -> gzip -> AES-256-GCM -> base64url -> "VLT1:<body>.<checksum>".
-   * opts: { salt?: Uint8Array, iterations?: number }
+   * Pipeline: JSON -> gzip -> AES-256-GCM -> base64url -> "VLT2:<body>.<checksum>".
+   * opts: { salt?: Uint8Array, kdf?: number|object }  (see normalizeKdf)
    */
   async function encryptDatabase(entries, password, opts) {
     opts = opts || {};
-    var rounds = opts.iterations || DEFAULT_ITERATIONS;
+    var kdf = normalizeKdf(opts.kdf);
     var salt = opts.salt || randomBytes(SALT_BYTES);
-    var key = await deriveKey(password, salt, rounds);
+    var key = await deriveKey(password, salt, kdf);
 
     var json = encoder.encode(JSON.stringify({ version: 3, entries: entries }));
     var gz = await gzip(json);
     var enc = await aesEncrypt(key, gz);
 
-    var body = toBase64url(concatBytes(salt, enc));
+    var header = encodeKdfHeader(kdf);
+    var body = toBase64url(concatBytes(header, salt, enc));
     var checksum = (await sha256Hex(body)).slice(0, 8);
 
-    return 'VLT1:' + body + '.' + checksum;
+    return 'VLT2:' + body + '.' + checksum;
   }
 
   /**
-   * Decrypt a transport string back into { salt, version, entries }.
+   * Decrypt a transport string back into { salt, kdf, version, entries }.
+   * Accepts VLT2 (self-describing) and legacy VLT1 (PBKDF2 600k).
    * Throws on wrong password (GCM auth failure) or damaged copy (checksum).
    */
-  async function decryptDatabase(str, password, iterations) {
-    if (typeof str !== 'string' || str.slice(0, 5) !== 'VLT1:') {
+  async function decryptDatabase(str, password) {
+    if (typeof str !== 'string') {
+      throw new Error('decryptDatabase: bad vault format');
+    }
+    var tag = str.slice(0, 5);
+    if (tag !== 'VLT2:' && tag !== 'VLT1:') {
       throw new Error('decryptDatabase: bad vault format');
     }
     var payload = str.slice(5);
@@ -236,13 +393,21 @@
     }
 
     var raw = fromBase64url(body);
-    var salt = raw.subarray(0, SALT_BYTES);
-    var enc = raw.subarray(SALT_BYTES);
-    var key = await deriveKey(password, salt, iterations);
+    var kdf, salt, enc;
+    if (tag === 'VLT2:') {
+      kdf = decodeKdfHeader(raw.subarray(0, HEADER_BYTES));
+      salt = raw.subarray(HEADER_BYTES, HEADER_BYTES + SALT_BYTES);
+      enc = raw.subarray(HEADER_BYTES + SALT_BYTES);
+    } else {
+      kdf = { id: 'pbkdf2', iterations: DEFAULT_ITERATIONS };
+      salt = raw.subarray(0, SALT_BYTES);
+      enc = raw.subarray(SALT_BYTES);
+    }
+    var key = await deriveKey(password, salt, kdf);
     var gz = await aesDecrypt(key, enc); // wrong password throws here
 
     var db = JSON.parse(decoder.decode(await gunzip(gz)));
-    return { salt: salt, version: db.version, entries: db.entries };
+    return { salt: salt, kdf: kdf, version: db.version, entries: db.entries };
   }
 
   /**
@@ -250,8 +415,8 @@
    * { n, u, o, l, e, password }. Legacy entries whose secret is
    * "username\0password" are migrated: login is extracted from the secret.
    */
-  async function decryptEntries(entries, password, salt, iterations) {
-    var key = await deriveKey(password, salt, iterations);
+  async function decryptEntries(entries, password, salt, params) {
+    var key = await deriveKey(password, salt, params);
     var out = [];
     for (var i = 0; i < entries.length; i++) {
       var e = entries[i];
@@ -283,6 +448,9 @@
 
   var api = {
     DEFAULT_ITERATIONS: DEFAULT_ITERATIONS,
+    DEFAULT_ARGON2: DEFAULT_ARGON2,
+    KDF_PBKDF2: KDF_PBKDF2,
+    KDF_ARGON2ID: KDF_ARGON2ID,
     SALT_BYTES: SALT_BYTES,
     IV_BYTES: IV_BYTES,
     randomBytes: randomBytes,

@@ -11,10 +11,12 @@ import java.util.Map;
 /**
  * Telegram bot (long polling) that hosts the Botwheel Vault Mini App.
  *
- * The bot does NO encryption/decryption: it only stores the opaque vault
+ * The bot does NO client-side encryption/decryption: it only stores the vault
  * transport string per user and hands it back over chat when the user taps
  * "Refresh database" (or sends /refresh). The user then opens the Mini App
- * (menu button / inline button) to unlock it with their password.
+ * (menu button / inline button) to unlock it with their password. The stored
+ * blob may additionally be wrapped with server-side *at-rest* encryption
+ * ({@link AtRestCrypto}); that layer is transparent to the client.
  */
 public final class BotwheelBot {
 
@@ -45,7 +47,9 @@ public final class BotwheelBot {
             System.out.println("Seed vault loaded (" + seedBlob.length() + " chars) from " + config.seedFile);
         }
 
-        try (VaultStore store = new VaultStore(config.dbPath)) {
+        AtRestCrypto atRest = AtRestCrypto.resolve(config.dbKey, config.dbKeyFile, System.out);
+
+        try (VaultStore store = new VaultStore(config.dbPath, atRest)) {
             System.out.println("Vault database: " + config.dbPath);
             new BotwheelBot(config, api, store, seedBlob).run();
         }

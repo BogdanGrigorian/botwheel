@@ -324,6 +324,40 @@ body {
   box-shadow: 0 0 0 3px var(--accent-glow), var(--focus-glow);
 }
 
+/* Passphrase strength meter (lock screen) */
+.strength {
+  margin-top: 8px;
+}
+
+.strength-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--card-border);
+  overflow: hidden;
+}
+
+.strength-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 2px;
+  background: var(--error);
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.strength[data-score="0"] .strength-fill { background: var(--error); }
+.strength[data-score="1"] .strength-fill { background: var(--amber); }
+.strength[data-score="2"] .strength-fill { background: var(--amber); }
+.strength[data-score="3"] .strength-fill { background: var(--teal); }
+.strength[data-score="4"] .strength-fill { background: #2e9e4f; }
+
+.strength-label {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
 .textarea {
   resize: vertical;
   font-family: var(--mono);

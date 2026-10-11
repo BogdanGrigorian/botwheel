@@ -1,6 +1,9 @@
 "use strict";
 
 const passwordInput = document.getElementById("password");
+const strengthEl = document.getElementById("strength");
+const strengthFill = document.getElementById("strength-fill");
+const strengthLabel = document.getElementById("strength-label");
 const usernameInput = document.getElementById("username");
 const loadBtn = document.getElementById("load-btn");
 const lockForm = document.getElementById("lock-form");
@@ -62,6 +65,7 @@ const state = {
   letter: null,  // active quick-search letter filter
   password: "",  // vault encryption key (kept in memory while unlocked)
   vaultSalt: null, // Uint8Array — per-vault salt for credential keys
+  kdf: null,     // vault KDF params (from decryptDatabase) for credential keys
   key: null,     // cached credential CryptoKey (derived lazily)
   selected: null, // record id currently shown in the details view
 };
@@ -73,7 +77,7 @@ const state = {
 // the user still holds the latest database or must fetch it again.
 //
 // The comparison key is the vault checksum (the 8 hex chars already embedded
-// in the "VLT1:...<checksum>" transport string) because it is content-based
+// in the "VLT2:...<checksum>" transport string) because it is content-based
 // and survives bot restarts, unlike a wall-clock timestamp. The timestamp is
 // still stored and shown to the user.
 const CACHE_KEYS = {
@@ -303,10 +307,12 @@ function lock() {
   state.letter = null;
   state.password = "";
   state.vaultSalt = null;
+  state.kdf = null;
   state.key = null;
   state.selected = null;
   searchInput.value = "";
   passwordInput.value = "";
+  updateStrength();
   result.hidden = true;
   detailsScreen.hidden = true;
   mainScreen.hidden = true;
@@ -445,7 +451,7 @@ let passwordRevealed = false;
 
 async function getCredentialKey() {
   if (!state.key) {
-    state.key = await window.CryptoCore.deriveKey(state.password, state.vaultSalt);
+    state.key = await window.CryptoCore.deriveKey(state.password, state.vaultSalt, state.kdf);
   }
   return state.key;
 }
@@ -556,6 +562,52 @@ function showPasteFallback() {
   pasteArea.focus();
 }
 
+// --- Passphrase strength meter ---
+// Heuristic only: a rough entropy estimate with penalties for obvious
+// patterns, so the user gets feedback while typing. Never blocks unlocking.
+function scorePassphrase(pw) {
+  const p = String(pw || "");
+  if (!p) return { score: 0, label: "" };
+
+  let pool = 0;
+  if (/[a-z]/.test(p)) pool += 26;
+  if (/[A-Z]/.test(p)) pool += 26;
+  if (/[0-9]/.test(p)) pool += 10;
+  if (/[^A-Za-z0-9]/.test(p)) pool += 33;
+
+  let bits = pool > 0 ? Math.log2(pool) * p.length : 0;
+
+  if (/^(.)\1*$/.test(p)) bits = Math.min(bits, 10);        // one repeated char
+  if (/(.)\1{2,}/.test(p)) bits -= 10;                        // runs like "aaa"
+  if (/^\d+$/.test(p)) bits -= 10;                           // digits only
+  if (/(012|123|234|345|456|567|678|789|890)/.test(p)) bits -= 10;
+  if (/(abc|bcd|cde|def|qwe|asd|zxc|pass|admin|letmein|welcome|qwerty|dragon)/i.test(p)) bits -= 15;
+  if (bits < 0) bits = 0;
+
+  let score;
+  if (bits < 28) score = 0;
+  else if (bits < 40) score = 1;
+  else if (bits < 60) score = 2;
+  else if (bits < 80) score = 3;
+  else score = 4;
+
+  const labels = ["Very weak", "Weak", "Fair", "Strong", "Excellent"];
+  return { score, label: labels[score] };
+}
+
+function updateStrength() {
+  const pw = passwordInput.value;
+  if (!pw) {
+    strengthEl.hidden = true;
+    return;
+  }
+  const { score, label } = scorePassphrase(pw);
+  strengthEl.hidden = false;
+  strengthEl.dataset.score = String(score);
+  strengthFill.style.width = ((score + 1) / 5 * 100) + "%";
+  strengthLabel.textContent = "Strength: " + label;
+}
+
 function setBusy(busy) {
   loadBtn.disabled = busy;
 }
@@ -606,6 +658,7 @@ async function load() {
         writeCache(blobText);
         state.password = password;
         state.vaultSalt = vault.salt;
+        state.kdf = vault.kdf || null;
         state.key = null;
         enterMainScreen(vault.entries);
         return;
@@ -626,6 +679,7 @@ lockForm.addEventListener("submit", (e) => {
   e.preventDefault();
   load();
 });
+passwordInput.addEventListener("input", updateStrength);
 lockBtn.addEventListener("click", lock);
 
 searchInput.addEventListener("input", () => {

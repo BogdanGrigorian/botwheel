@@ -18,12 +18,18 @@ import java.sql.Statement;
  * {@code eclipse-temurin} JRE image and works the same on Windows and Linux.
  * The database is a single file, e.g. {@code botwheel-db.mv.db}.
  *
- * The bot never decrypts or inspects the blob — it only stores the opaque
+ * The bot never inspects the vault contents — it only stores the opaque
  * transport string and hands it back over chat. Besides the blob each row
  * keeps metadata: the monotonic {@code version}, the format tag, the 8-hex
  * checksum and the created/updated timestamps. The upload path (Mini App ->
  * bot) will call {@link #put(long, String)}; the refresh path calls
  * {@link #get(long)}.
+ *
+ * When constructed with an {@link AtRestCrypto}, the {@code blob} column holds
+ * SERVER-ENCRYPTED ciphertext ({@code SRV1.…}); the metadata is still computed
+ * from the plaintext transport string so the Mini App's revision stamp stays
+ * consistent. Legacy plaintext rows are read transparently and re-encrypted on
+ * the next write.
  */
 public final class VaultStore implements AutoCloseable {
 
@@ -83,13 +89,23 @@ public final class VaultStore implements AutoCloseable {
             """;
 
     private final Connection conn;
+    private final AtRestCrypto atRest; // nullable — null means store the blob as-is
 
     /**
-     * Open (creating if absent) the database at {@code dbPath}. The path may be
-     * a filesystem location ({@code /data/botwheel}) or a full H2 JDBC URL
-     * ({@code jdbc:h2:mem:test}).
+     * Open (creating if absent) the database at {@code dbPath} WITHOUT at-rest
+     * encryption. The path may be a filesystem location ({@code /data/botwheel})
+     * or a full H2 JDBC URL ({@code jdbc:h2:mem:test}).
      */
     public VaultStore(String dbPath) {
+        this(dbPath, null);
+    }
+
+    /**
+     * Open the database, optionally wrapping every stored blob with the given
+     * server-side at-rest cipher. Pass {@code null} to store blobs as-is.
+     */
+    public VaultStore(String dbPath, AtRestCrypto atRest) {
+        this.atRest = atRest;
         this.conn = open(dbPath);
         try (Statement st = conn.createStatement()) {
             st.execute(CREATE_TABLE);
@@ -149,8 +165,10 @@ public final class VaultStore implements AutoCloseable {
                 if (!rs.next()) {
                     return null;
                 }
+                String stored = rs.getString("blob");
+                String blob = atRest == null ? stored : atRest.decrypt(stored);
                 return new Entry(
-                        rs.getString("blob"),
+                        blob,
                         rs.getLong("version"),
                         rs.getLong("created_at"),
                         rs.getLong("updated_at"),
@@ -171,10 +189,13 @@ public final class VaultStore implements AutoCloseable {
         String format = formatOf(blob);
         String checksum = checksumOf(blob);
         int length = blob == null ? 0 : blob.length();
+        // Metadata is derived from the plaintext transport string; only the
+        // stored blob column is wrapped with the server-side at-rest cipher.
+        String stored = atRest == null ? blob : atRest.encrypt(blob);
 
         try (PreparedStatement ps = conn.prepareStatement(MERGE)) {
             ps.setLong(1, userId);
-            ps.setString(2, blob);
+            ps.setString(2, stored);
             ps.setLong(3, version);
             ps.setString(4, format);
             ps.setString(5, checksum);
@@ -188,7 +209,7 @@ public final class VaultStore implements AutoCloseable {
         return new Entry(blob, version, createdAt, now, format, checksum, length);
     }
 
-    /** The 8-hex checksum embedded in the "VLT1:...<checksum>" transport string. */
+    /** The 8-hex checksum embedded in the "VLT2:...<checksum>" transport string. */
     public static String checksumOf(String blob) {
         if (blob == null) {
             return "";

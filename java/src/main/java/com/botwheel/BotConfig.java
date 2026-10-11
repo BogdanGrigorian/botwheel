@@ -18,6 +18,8 @@ import java.util.Set;
  *   telegram.seed.file   / TELEGRAM_SEED_FILE   (optional demo vault blob)
  *   telegram.allowed.user.ids / TELEGRAM_ALLOWED_USER_IDS (optional allowlist)
  *   telegram.db.path     / TELEGRAM_DB_PATH      (embedded H2 database location)
+ *   telegram.db.key      / TELEGRAM_DB_KEY       (optional base64 32-byte server key)
+ *   telegram.db.key.file / TELEGRAM_DB_KEY_FILE  (optional key file; created if missing)
  */
 public final class BotConfig {
 
@@ -25,14 +27,18 @@ public final class BotConfig {
     public final String miniAppUrl;
     public final String seedFile; // may be null
     public final String dbPath; // H2 database path or jdbc:h2: URL
+    public final String dbKey; // base64 server-side at-rest key, or ""
+    public final String dbKeyFile; // key file path, or "off" to disable
     public final Set<Long> allowedUserIds; // empty = allow everyone
 
     private BotConfig(String botToken, String miniAppUrl, String seedFile, String dbPath,
-            Set<Long> allowedUserIds) {
+            String dbKey, String dbKeyFile, Set<Long> allowedUserIds) {
         this.botToken = botToken;
         this.miniAppUrl = miniAppUrl;
         this.seedFile = seedFile;
         this.dbPath = dbPath;
+        this.dbKey = dbKey;
+        this.dbKeyFile = dbKeyFile;
         this.allowedUserIds = allowedUserIds;
     }
 
@@ -67,8 +73,16 @@ public final class BotConfig {
         String dbPath = resolve("telegram.db.path", "TELEGRAM_DB_PATH", props, "botwheel-db");
         dbPath = dbPath.trim();
 
+        // At-rest key material: either an explicit base64 key, or a key file.
+        // Default is a sibling "<db>.key" so Docker's single ./data mount stays
+        // consistent; set telegram.db.key.file=off to disable, or point it at a
+        // path on a separate volume for real key/DB separation.
+        String dbKey = resolve("telegram.db.key", "TELEGRAM_DB_KEY", props, "").trim();
+        String defaultKeyFile = dbPath.startsWith("jdbc:h2:") ? AtRestCrypto.DISABLED : dbPath + ".key";
+        String dbKeyFile = resolve("telegram.db.key.file", "TELEGRAM_DB_KEY_FILE", props, defaultKeyFile).trim();
+
         return new BotConfig(token, url,
-                (seed == null || seed.isEmpty()) ? null : seed, dbPath, allowedUserIds);
+                (seed == null || seed.isEmpty()) ? null : seed, dbPath, dbKey, dbKeyFile, allowedUserIds);
     }
 
     private static Set<Long> parseAllowedUsers(String raw) {

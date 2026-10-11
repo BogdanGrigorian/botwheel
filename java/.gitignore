@@ -5,3 +5,4 @@ test-vault.decrypted.json
 bot.properties
 botwheel-db*.mv.db
 botwheel-db*.trace.db
+botwheel-db*.key

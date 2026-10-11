@@ -21,6 +21,9 @@ import java.util.Map;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
+import org.bouncycastle.crypto.generators.Argon2BytesGenerator;
+import org.bouncycastle.crypto.params.Argon2Parameters;
+
 /**
  * CryptoCore — Java port of crypto-core.js.
  *
@@ -29,15 +32,27 @@ import java.util.zip.GZIPOutputStream;
  *
  *   Field (self-contained):  "s1.<base64url(salt || iv || ct || tag)>"
  *   Field (with key):        "s1.<base64url(iv || ct || tag)>"
- *   Vault (transport):       "VLT1:<base64url(salt || iv || ct || tag)>.<8-hex-checksum>"
+ *   Vault (transport):       "VLT2:<base64url(header || salt || iv || ct || tag)>.<8-hex-checksum>"
+ *   Vault (legacy):          "VLT1:<base64url(salt || iv || ct || tag)>.<8-hex-checksum>"
  *
- * Uses only JDK built-ins (javax.crypto, java.util.zip, java.util.Base64).
+ * The VLT2 header (13 bytes, little-endian) self-describes the KDF:
+ *   id(1) || p1(4) || p2(4) || p3(4)
+ *   argon2id: p1 = memory KiB, p2 = iterations, p3 = parallelism
+ *   pbkdf2  : p1 = iterations
+ *
+ * Argon2id comes from Bouncy Castle (pure Java, test-only scope); everything
+ * else uses JDK built-ins (javax.crypto, java.util.zip, java.util.Base64).
  */
 public final class CryptoCore {
 
-    public static final int DEFAULT_ITERATIONS = 600000; // PBKDF2-SHA256 rounds
-    public static final int SALT_BYTES = 16;             // PBKDF2 salt
+    public static final int DEFAULT_ITERATIONS = 600000; // PBKDF2-SHA256 rounds (legacy)
+    public static final int SALT_BYTES = 16;             // PBKDF2/Argon2 salt
     public static final int IV_BYTES = 12;               // AES-GCM nonce (96-bit)
+
+    // KDF identifiers + VLT2 header layout.
+    public static final int KDF_PBKDF2 = 1;
+    public static final int KDF_ARGON2ID = 2;
+    public static final int HEADER_BYTES = 13;           // id(1) || p1(4) || p2(4) || p3(4)
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -99,8 +114,35 @@ public final class CryptoCore {
     /** Result of decryptDatabase(). */
     public static class Vault {
         public byte[] salt;
+        public KdfParams kdf;
         public int version;
         public List<Entry> entries;
+    }
+
+    /** KDF choice carried in the VLT2 header (mirrors normalizeKdf in JS). */
+    public static final class KdfParams {
+        public final String id;   // "argon2id" | "pbkdf2"
+        public final int memoryKiB;
+        public final int iterations;
+        public final int parallelism;
+
+        private KdfParams(String id, int memoryKiB, int iterations, int parallelism) {
+            this.id = id;
+            this.memoryKiB = memoryKiB;
+            this.iterations = iterations;
+            this.parallelism = parallelism;
+        }
+
+        public static KdfParams argon2id(int memoryKiB, int iterations, int parallelism) {
+            return new KdfParams("argon2id", memoryKiB, iterations, parallelism);
+        }
+
+        public static KdfParams pbkdf2(int iterations) {
+            return new KdfParams("pbkdf2", 0, iterations, 0);
+        }
+
+        /** Matches DEFAULT_ARGON2 in crypto-core.js. */
+        public static final KdfParams DEFAULT_ARGON2 = argon2id(65536, 3, 1);
     }
 
     // ------------------------------------------------------------------
@@ -136,11 +178,74 @@ public final class CryptoCore {
     // Key derivation + AES-GCM
     // ------------------------------------------------------------------
 
-    /** PBKDF2-SHA256 -> 256-bit AES key (matches WebCrypto PBKDF2). */
+    /** PBKDF2-SHA256 -> 256-bit AES key (legacy VLT1 path). */
     public static SecretKeySpec deriveKey(String password, byte[] salt, int iterations) throws Exception {
         KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, 256);
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
         return new SecretKeySpec(factory.generateSecret(spec).getEncoded(), "AES");
+    }
+
+    /** Argon2id (Bouncy Castle) -> 256-bit AES key. UTF-8 password, like WebCrypto/hash-wasm. */
+    public static SecretKeySpec deriveKeyArgon2(String password, byte[] salt, KdfParams p) {
+        Argon2Parameters params = new Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
+                .withVersion(Argon2Parameters.ARGON2_VERSION_13)
+                .withIterations(p.iterations)
+                .withMemoryAsKB(p.memoryKiB)
+                .withParallelism(p.parallelism)
+                .withSalt(salt)
+                .build();
+        Argon2BytesGenerator gen = new Argon2BytesGenerator();
+        gen.init(params);
+        byte[] out = new byte[32];
+        gen.generateBytes(password.toCharArray(), out);
+        return new SecretKeySpec(out, "AES");
+    }
+
+    /** Derive a 256-bit AES key, dispatching on the KDF id (null -> PBKDF2 legacy). */
+    public static SecretKeySpec deriveKey(String password, byte[] salt, KdfParams kdf) throws Exception {
+        if (kdf != null && "argon2id".equals(kdf.id)) {
+            return deriveKeyArgon2(password, salt, kdf);
+        }
+        return deriveKey(password, salt, kdf != null ? kdf.iterations : DEFAULT_ITERATIONS);
+    }
+
+    // --- Self-describing KDF header (VLT2), 13 bytes, little-endian ---
+
+    private static void writeU32(byte[] b, int off, int v) {
+        b[off] = (byte) (v & 0xff);
+        b[off + 1] = (byte) ((v >>> 8) & 0xff);
+        b[off + 2] = (byte) ((v >>> 16) & 0xff);
+        b[off + 3] = (byte) ((v >>> 24) & 0xff);
+    }
+
+    private static int readU32(byte[] b, int off) {
+        return (b[off] & 0xff) | ((b[off + 1] & 0xff) << 8)
+                | ((b[off + 2] & 0xff) << 16) | ((b[off + 3] & 0xff) << 24);
+    }
+
+    static byte[] encodeKdfHeader(KdfParams p) {
+        byte[] b = new byte[HEADER_BYTES];
+        if ("argon2id".equals(p.id)) {
+            b[0] = (byte) KDF_ARGON2ID;
+            writeU32(b, 1, p.memoryKiB);
+            writeU32(b, 5, p.iterations);
+            writeU32(b, 9, p.parallelism);
+        } else {
+            b[0] = (byte) KDF_PBKDF2;
+            writeU32(b, 1, p.iterations);
+        }
+        return b;
+    }
+
+    static KdfParams decodeKdfHeader(byte[] b) {
+        int id = b[0] & 0xff;
+        if (id == KDF_ARGON2ID) {
+            return KdfParams.argon2id(readU32(b, 1), readU32(b, 5), readU32(b, 9));
+        }
+        if (id == KDF_PBKDF2) {
+            return KdfParams.pbkdf2(readU32(b, 1));
+        }
+        throw new IllegalArgumentException("decryptDatabase: unknown KDF id " + id);
     }
 
     /** AES-256-GCM encrypt. Returns iv || ciphertext || tag. */
@@ -235,31 +340,34 @@ public final class CryptoCore {
     // ------------------------------------------------------------------
 
     public static String encryptDatabase(List<Entry> entries, String password) throws Exception {
-        return encryptDatabase(entries, password, null, DEFAULT_ITERATIONS);
+        return encryptDatabase(entries, password, null, KdfParams.DEFAULT_ARGON2);
     }
 
-    public static String encryptDatabase(List<Entry> entries, String password, byte[] salt, int iterations)
+    public static String encryptDatabase(List<Entry> entries, String password, byte[] salt, KdfParams kdf)
             throws Exception {
         if (salt == null) {
             salt = randomBytes(SALT_BYTES);
         }
-        SecretKeySpec key = deriveKey(password, salt, iterations);
+        if (kdf == null) {
+            kdf = KdfParams.DEFAULT_ARGON2;
+        }
+        SecretKeySpec key = deriveKey(password, salt, kdf);
         byte[] json = toJson(entries).getBytes(StandardCharsets.UTF_8);
         byte[] gz = gzip(json);
         byte[] enc = aesEncrypt(key, gz);
 
-        String body = toBase64url(concat(salt, enc));
+        String body = toBase64url(concat(encodeKdfHeader(kdf), salt, enc));
         String checksum = sha256Hex(body).substring(0, 8);
 
-        return "VLT1:" + body + "." + checksum;
+        return "VLT2:" + body + "." + checksum;
     }
 
     public static Vault decryptDatabase(String str, String password) throws Exception {
-        return decryptDatabase(str, password, DEFAULT_ITERATIONS);
-    }
-
-    public static Vault decryptDatabase(String str, String password, int iterations) throws Exception {
-        if (str == null || !str.startsWith("VLT1:")) {
+        if (str == null || str.length() < 5) {
+            throw new IllegalArgumentException("decryptDatabase: bad vault format");
+        }
+        String tag = str.substring(0, 5);
+        if (!tag.equals("VLT2:") && !tag.equals("VLT1:")) {
             throw new IllegalArgumentException("decryptDatabase: bad vault format");
         }
         String payload = str.substring(5);
@@ -273,25 +381,41 @@ public final class CryptoCore {
         }
 
         byte[] raw = fromBase64url(body);
-        byte[] salt = Arrays.copyOfRange(raw, 0, SALT_BYTES);
-        byte[] enc = Arrays.copyOfRange(raw, SALT_BYTES, raw.length);
-        SecretKeySpec key = deriveKey(password, salt, iterations);
+        KdfParams kdf;
+        byte[] salt;
+        byte[] enc;
+        if (tag.equals("VLT2:")) {
+            kdf = decodeKdfHeader(Arrays.copyOfRange(raw, 0, HEADER_BYTES));
+            salt = Arrays.copyOfRange(raw, HEADER_BYTES, HEADER_BYTES + SALT_BYTES);
+            enc = Arrays.copyOfRange(raw, HEADER_BYTES + SALT_BYTES, raw.length);
+        } else {
+            kdf = KdfParams.pbkdf2(DEFAULT_ITERATIONS);
+            salt = Arrays.copyOfRange(raw, 0, SALT_BYTES);
+            enc = Arrays.copyOfRange(raw, SALT_BYTES, raw.length);
+        }
+        SecretKeySpec key = deriveKey(password, salt, kdf);
         byte[] gz = aesDecrypt(key, enc); // wrong password => AEADBadTagException
 
         Vault vault = parseJson(new String(gunzip(gz), StandardCharsets.UTF_8));
         vault.salt = salt;
+        vault.kdf = kdf;
         return vault;
     }
 
     /** Unwrap every record's `s` field (encrypted password) into { n, u, o, l, e, password }. */
     public static List<DecryptedEntry> decryptEntries(List<Entry> entries, String password, byte[] salt)
             throws Exception {
-        return decryptEntries(entries, password, salt, DEFAULT_ITERATIONS);
+        return decryptEntries(entries, password, salt, KdfParams.pbkdf2(DEFAULT_ITERATIONS));
     }
 
     public static List<DecryptedEntry> decryptEntries(List<Entry> entries, String password, byte[] salt, int iterations)
             throws Exception {
-        SecretKeySpec key = deriveKey(password, salt, iterations);
+        return decryptEntries(entries, password, salt, KdfParams.pbkdf2(iterations));
+    }
+
+    public static List<DecryptedEntry> decryptEntries(List<Entry> entries, String password, byte[] salt, KdfParams kdf)
+            throws Exception {
+        SecretKeySpec key = deriveKey(password, salt, kdf);
         List<DecryptedEntry> out = new ArrayList<>();
         for (Entry e : entries) {
             String secret = decryptWithKey(key, e.s);

@@ -8,6 +8,10 @@ services:
       MINIAPP_URL: ${MINIAPP_URL:-https://bogdangrigorian.github.io/botwheel/}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
       TELEGRAM_DB_PATH: /data/botwheel
+      # Server-side at-rest key. Default is /data/botwheel.key (auto-created);
+      # for real separation mount it from a different volume, or pass a base64
+      # 32-byte key via TELEGRAM_DB_KEY. Set TELEGRAM_DB_KEY_FILE=off to disable.
+      TELEGRAM_DB_KEY_FILE: /data/botwheel.key
       # TELEGRAM_SEED_FILE: /data/test-vault.txt
     volumes:
       # Persistent storage for the embedded H2 vault database.
