@@ -230,16 +230,16 @@ public final class BotwheelBot {
         VaultStore.Entry entry = store.get(userId);
         if (entry == null || entry.blob == null || entry.blob.isEmpty()) {
             api.sendMessage(chatId,
-                    "No vault stored yet. Create it in the Mini App, then send the /update "
-                            + "command it copies for you to store it here.",
-                    null);
+                    "No vault stored yet. Create it in the Mini App and send it back here "
+                            + "(open the vault with the keyboard button below).",
+                    updateKeyboard(userId));
             return;
         }
         String blob = entry.blob;
         // Wrap the vault in a <pre> block so the user can tap it to copy.
         String text = "Your encrypted vault (v" + entry.version + "):\n\n<pre>" + blob + "</pre>";
         if (text.length() <= MAX_MESSAGE_LENGTH) {
-            api.sendMessage(chatId, text, null, "HTML");
+            api.sendMessage(chatId, text, updateKeyboard(userId), "HTML");
         } else {
             api.sendMessage(chatId,
                     "Your vault is too large for a single message — sending it as a file.", null);
@@ -262,6 +262,13 @@ public final class BotwheelBot {
         if (blob == null) {
             api.sendMessage(chatId,
                     "Send the vault string produced by the Mini App, e.g.\n/update VLT2:\u2026", null);
+            return;
+        }
+        VaultStore.Entry current = store.get(userId);
+        if (current != null && VaultStore.checksumOf(blob).equals(current.checksum)) {
+            api.sendMessage(chatId,
+                    "Already stored as v" + current.version + " (" + current.checksum
+                            + ") \u2014 nothing to update.", null);
             return;
         }
         VaultStore.Entry entry = store.put(userId, blob);

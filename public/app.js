@@ -182,6 +182,36 @@ function clearCache() {
   preferredBlob = "";
 }
 
+// A saved vault that hasn't reached the bot yet (see flushPending()).
+const PENDING_KEY = "botwheel-vault-pending";
+
+function readPending() {
+  try { return localStorage.getItem(PENDING_KEY) || ""; } catch (e) { return ""; }
+}
+
+function setPending(blob) {
+  try { localStorage.setItem(PENDING_KEY, blob); } catch (e) {}
+}
+
+function clearPending() {
+  try { localStorage.removeItem(PENDING_KEY); } catch (e) {}
+}
+
+// sendData() is only delivered when the Mini App was opened from the keyboard
+// button. So a vault saved from an inline/menu launch is queued here and pushed
+// automatically the next time the app is opened that way.
+function flushPending() {
+  const pending = readPending();
+  if (!pending || !canSendData()) return false;
+  try {
+    tg.sendData("/update " + pending);
+    clearPending();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Compact "YYYY-MM-DD HH:MM" stamp so the cache line stays on one row.
 function fmtStamp(ms) {
   const n = Number(ms);
@@ -731,14 +761,14 @@ function sendToBot(cmd) {
 }
 
 function renderSavePanel(cmd) {
-  const canSend = hasSendData();
+  const canAuto = canSendData();
   saveCommand.value = cmd;
-  saveSend.hidden = !canSend;
-  saveCopy.classList.toggle("button-secondary", canSend);
+  saveSend.hidden = !hasSendData();
+  saveCopy.classList.toggle("button-secondary", hasSendData());
   saveCopy.textContent = "Copy command";
-  saveHint.textContent = canSend
-    ? "Tap \u201CSend to bot\u201D to store the new version. Automatic send only works when you open the vault from the keyboard button in the chat \u2014 otherwise copy the command and paste it."
-    : "Your changes are saved in this browser. Copy the command below, paste it into the chat with the bot and send it \u2014 that stores the new version.";
+  saveHint.textContent = canAuto
+    ? "Tap \u201CSend to bot\u201D to store the new version, or copy the command and paste it into the chat."
+    : "Saved in this browser \u2014 not stored on the bot yet. Tap \u201CCopy command\u201D and paste it into the chat, or reopen the vault from the keyboard button in the chat to send it automatically.";
   saveScreen.hidden = false;
   copyText(cmd).then(() => {
     saveCopy.textContent = "Copied!";
@@ -749,6 +779,7 @@ function renderSavePanel(cmd) {
 function showSavePanel(blob) {
   const cmd = "/update " + blob;
   if (canSendData() && sendToBot(cmd)) {
+    clearPending();
     // sendData closes the Mini App. If the client ignored it, fall back to the
     // manual panel a moment later.
     setTimeout(() => {
@@ -756,6 +787,7 @@ function showSavePanel(blob) {
     }, 1000);
     return;
   }
+  setPending(blob);
   renderSavePanel(cmd);
 }
 
@@ -969,6 +1001,7 @@ saveBack.addEventListener("click", () => {
 });
 
 saveCopy.addEventListener("click", async () => {
+  clearPending(); // taking the manual route — don't auto-send later
   await copyText(saveCommand.value);
   saveCopy.textContent = "Copied!";
   setTimeout(() => { saveCopy.textContent = "Copy command"; }, 1500);
@@ -982,6 +1015,7 @@ saveSend.addEventListener("click", () => {
     saveHint.textContent = "This client refused the automatic send \u2014 copy the command and paste it into the chat instead.";
     return;
   }
+  clearPending();
   saveSend.textContent = "Sent!";
   setTimeout(() => { saveSend.textContent = "Send to bot"; }, 1500);
 });
@@ -1046,3 +1080,4 @@ cacheForget.addEventListener("click", () => {
 });
 
 initCache();
+flushPending();
