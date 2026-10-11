@@ -1,6 +1,7 @@
 # --- AI agent context (personal, don't commit) ---
 AGENTS.md
 .github/copilot-instructions.md
+.github/skills/
 
 # --- Editor/workspace settings (personal) ---
 .vscode/
@@ -12,3 +13,8 @@ java/target/
 # --- Generated test data ---
 test-vault.txt
 test-vault.decrypted.json
+
+# --- Local vault database (embedded H2) ---
+java/botwheel-db*.mv.db
+java/botwheel-db*.trace.db
+data/

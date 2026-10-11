@@ -11,5 +11,6 @@ WORKDIR /app
 COPY --from=build /build/target/botwheel-bot-1.0.0.jar app.jar
 
 # The bot reads config from env vars (TELEGRAM_BOT_TOKEN, MINIAPP_URL,
-# TELEGRAM_SEED_FILE) — see BotConfig.load(). No args needed.
+# TELEGRAM_SEED_FILE, TELEGRAM_DB_PATH) — see BotConfig.load(). No args needed.
+# The shaded jar already contains the embedded H2 driver.
 ENTRYPOINT ["java", "-cp", "app.jar", "com.botwheel.BotwheelBot"]

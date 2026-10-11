@@ -17,18 +17,22 @@ import java.util.Set;
  *   telegram.miniapp.url / MINIAPP_URL          (GitHub Pages URL of the Mini App)
  *   telegram.seed.file   / TELEGRAM_SEED_FILE   (optional demo vault blob)
  *   telegram.allowed.user.ids / TELEGRAM_ALLOWED_USER_IDS (optional allowlist)
+ *   telegram.db.path     / TELEGRAM_DB_PATH      (embedded H2 database location)
  */
 public final class BotConfig {
 
     public final String botToken;
     public final String miniAppUrl;
     public final String seedFile; // may be null
+    public final String dbPath; // H2 database path or jdbc:h2: URL
     public final Set<Long> allowedUserIds; // empty = allow everyone
 
-    private BotConfig(String botToken, String miniAppUrl, String seedFile, Set<Long> allowedUserIds) {
+    private BotConfig(String botToken, String miniAppUrl, String seedFile, String dbPath,
+            Set<Long> allowedUserIds) {
         this.botToken = botToken;
         this.miniAppUrl = miniAppUrl;
         this.seedFile = seedFile;
+        this.dbPath = dbPath;
         this.allowedUserIds = allowedUserIds;
     }
 
@@ -60,8 +64,11 @@ public final class BotConfig {
         String allowedRaw = resolve("telegram.allowed.user.ids", "TELEGRAM_ALLOWED_USER_IDS", props, "");
         Set<Long> allowedUserIds = parseAllowedUsers(allowedRaw);
 
+        String dbPath = resolve("telegram.db.path", "TELEGRAM_DB_PATH", props, "botwheel-db");
+        dbPath = dbPath.trim();
+
         return new BotConfig(token, url,
-                (seed == null || seed.isEmpty()) ? null : seed, allowedUserIds);
+                (seed == null || seed.isEmpty()) ? null : seed, dbPath, allowedUserIds);
     }
 
     private static Set<Long> parseAllowedUsers(String raw) {

@@ -35,7 +35,6 @@ public final class BotwheelBot {
     public static void main(String[] args) throws Exception {
         BotConfig config = BotConfig.load();
         TelegramApi api = new TelegramApi(config.botToken);
-        VaultStore store = new VaultStore();
 
         Map<String, Object> me = api.getMe();
         String username = Json.str(Json.obj(me.get("result")).get("username"));
@@ -46,7 +45,10 @@ public final class BotwheelBot {
             System.out.println("Seed vault loaded (" + seedBlob.length() + " chars) from " + config.seedFile);
         }
 
-        new BotwheelBot(config, api, store, seedBlob).run();
+        try (VaultStore store = new VaultStore(config.dbPath)) {
+            System.out.println("Vault database: " + config.dbPath);
+            new BotwheelBot(config, api, store, seedBlob).run();
+        }
     }
 
     private static String loadSeed(String seedFile) {
@@ -219,7 +221,7 @@ public final class BotwheelBot {
         return config.miniAppUrl + sep
                 + "v=" + entry.version
                 + "&t=" + entry.updatedAtMillis
-                + "&c=" + checksumOf(entry.blob);
+                + "&c=" + entry.checksum;
     }
 
     /** Keep the per-chat "Open Vault" quick-access button at the current revision. */
@@ -229,15 +231,6 @@ public final class BotwheelBot {
         } catch (Exception e) {
             System.err.println("Could not update menu button for chat " + chatId + ": " + e.getMessage());
         }
-    }
-
-    /** The 8-hex checksum embedded in the "VLT1:...<checksum>" transport string. */
-    private static String checksumOf(String blob) {
-        if (blob == null) {
-            return "";
-        }
-        int dot = blob.lastIndexOf('.');
-        return dot == -1 ? "" : blob.substring(dot + 1);
     }
 
     private boolean isAllowed(long userId) {

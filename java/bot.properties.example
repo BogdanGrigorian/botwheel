@@ -14,3 +14,7 @@ telegram.seed.file=test-vault.txt
 # Optional: comma/space-separated list of Telegram user IDs allowed to use the bot.
 # Leave empty to allow everyone.
 telegram.allowed.user.ids=
+
+# Optional: embedded H2 database location for the stored vaults.
+# Relative paths are resolved against the working directory; H2 appends .mv.db.
+telegram.db.path=botwheel-db
