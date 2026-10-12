@@ -296,7 +296,7 @@ public final class BotwheelBot {
         api.sendMessage(chatId,
                 "Vault updated to v" + entry.version + " (" + entry.checksum + "). "
                         + "Tap \u201CRefresh database\u201D to receive it."
-                        + (note.isEmpty() ? "" : " Updates: " + note),
+                        + (note.isEmpty() ? "" : " " + note),
                 updateKeyboard(userId));
     }
 

@@ -725,7 +725,7 @@ async function saveEditor(e) {
     updateVaultMeta();
     render();
     await openRecord(rec);
-    showSavePanel(blob, (isNew ? "added new record: " : "updated record: ") + n);
+    showSavePanel(blob, (isNew ? "Added new record: " : "Updated record: ") + n);
   } catch (err) {
     setEditError("Could not save: " + (err && err.message ? err.message : err));
   } finally {
