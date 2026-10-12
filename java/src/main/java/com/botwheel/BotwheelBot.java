@@ -24,6 +24,7 @@ import java.util.Set;
 public final class BotwheelBot {
 
     private static final int MAX_MESSAGE_LENGTH = 4096;
+    private static final int MAX_NOTE_LENGTH = 120;
 
     private final BotConfig config;
     private final TelegramApi api;
@@ -289,11 +290,37 @@ public final class BotwheelBot {
             return;
         }
         VaultStore.Entry entry = store.put(userId, blob);
+        // The Mini App appends what it changed, so the confirmation can say so.
+        String note = extractVaultNote(raw, blob);
         // Re-send the keyboard so its Mini App URL carries the new revision.
         api.sendMessage(chatId,
                 "Vault updated to v" + entry.version + " (" + entry.checksum + "). "
-                        + "Tap \u201CRefresh database\u201D to receive it.",
+                        + "Tap \u201CRefresh database\u201D to receive it."
+                        + (note.isEmpty() ? "" : " Updates: " + note),
                 updateKeyboard(userId));
+    }
+
+    /**
+     * Pull the Mini App's short change description out of the update payload.
+     * It rides after the blob on a new line, prefixed with "note:" (e.g.
+     * "note: added new record: GitHub"); anything else is ignored. Returns ""
+     * when there is no note.
+     */
+    private static String extractVaultNote(String raw, String blob) {
+        if (raw == null || blob == null) {
+            return "";
+        }
+        int end = raw.indexOf(blob) + blob.length();
+        String rest = raw.substring(Math.min(end, raw.length())).trim();
+        if (!rest.regionMatches(true, 0, "note:", 0, 5)) {
+            return "";
+        }
+        // One short line only — it is appended to the confirmation message.
+        rest = rest.substring(5).replaceAll("\\s+", " ").trim();
+        if (rest.length() > MAX_NOTE_LENGTH) {
+            rest = rest.substring(0, MAX_NOTE_LENGTH).trim() + "\u2026";
+        }
+        return rest;
     }
 
     /** True if the message already carries a vault transport string. */

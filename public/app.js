@@ -203,8 +203,8 @@ function readPending() {
   try { return localStorage.getItem(PENDING_KEY) || ""; } catch (e) { return ""; }
 }
 
-function setPending(blob) {
-  try { localStorage.setItem(PENDING_KEY, blob); } catch (e) {}
+function setPending(payload) {
+  try { localStorage.setItem(PENDING_KEY, payload); } catch (e) {}
 }
 
 function clearPending() {
@@ -691,6 +691,7 @@ async function saveEditor(e) {
     let rec = state.editingId != null
       ? state.records.find((r) => r.id === state.editingId)
       : null;
+    const isNew = !rec;
     if (!rec) {
       rec = { id: state.nextId++ };
       state.records.push(rec);
@@ -724,7 +725,7 @@ async function saveEditor(e) {
     updateVaultMeta();
     render();
     await openRecord(rec);
-    showSavePanel(blob);
+    showSavePanel(blob, (isNew ? "added new record: " : "updated record: ") + n);
   } catch (err) {
     setEditError("Could not save: " + (err && err.message ? err.message : err));
   } finally {
@@ -772,8 +773,15 @@ function renderSavePanel(cmd) {
   }).catch(() => {});
 }
 
-function showSavePanel(blob) {
-  const cmd = "/update " + blob;
+// The blob carries no whitespace, so the optional change description rides
+// after it on a new line ("note: …"); the bot appends it to its confirmation.
+function updatePayload(blob, note) {
+  return blob + (note ? "\nnote: " + note : "");
+}
+
+function showSavePanel(blob, note) {
+  const payload = updatePayload(blob, note);
+  const cmd = "/update " + payload;
   if (canSendData() && sendToBot(cmd)) {
     clearPending();
     // sendData closes the Mini App. If the client ignored it, fall back to the
@@ -783,7 +791,7 @@ function showSavePanel(blob) {
     }, 1000);
     return;
   }
-  setPending(blob);
+  setPending(payload);
   renderSavePanel(cmd);
 }
 
