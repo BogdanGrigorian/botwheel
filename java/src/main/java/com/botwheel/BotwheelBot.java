@@ -248,8 +248,13 @@ public final class BotwheelBot {
             return;
         }
         String blob = entry.blob;
-        // Wrap the vault in a <pre> block so the user can tap it to copy.
-        String text = "Your encrypted vault (v" + entry.version + "):\n\n<pre>" + blob + "</pre>";
+        // An expandable blockquote is collapsed by default, so a long blob no
+        // longer fills the chat; the user taps it to expand and copy. Copying
+        // the whole message works too — the Mini App digs the transport string
+        // out of whatever text it is given.
+        String text = "\uD83D\uDD10 Your encrypted vault (v" + entry.version + ")\n"
+                + "Tap the quote to expand, then copy it into the Mini App.\n\n"
+                + "<blockquote expandable>" + blob + "</blockquote>";
         if (text.length() <= MAX_MESSAGE_LENGTH) {
             api.sendMessage(chatId, text, updateKeyboard(userId), "HTML");
         } else {

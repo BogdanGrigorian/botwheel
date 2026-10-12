@@ -362,15 +362,40 @@ public final class CryptoCore {
         return "VLT2:" + body + "." + checksum;
     }
 
+    /**
+     * Pull the transport string ("VLT2:…"/"VLT1:…") out of a possibly larger
+     * text — the user may copy the whole chat message, not just the blob — and
+     * drop any trailing text. Returns "" when there is no transport string.
+     */
+    private static String extractTransport(String str) {
+        if (str == null) {
+            return "";
+        }
+        String s = str.trim();
+        int at = s.indexOf("VLT2:");
+        if (at < 0) {
+            at = s.indexOf("VLT1:");
+        }
+        if (at < 0) {
+            return "";
+        }
+        s = s.substring(at);
+        for (int i = 0; i < s.length(); i++) {
+            if (Character.isWhitespace(s.charAt(i))) {
+                s = s.substring(0, i);
+                break;
+            }
+        }
+        return s;
+    }
+
     public static Vault decryptDatabase(String str, String password) throws Exception {
-        if (str == null || str.length() < 5) {
+        String payload = extractTransport(str);
+        if (payload.isEmpty()) {
             throw new IllegalArgumentException("decryptDatabase: bad vault format");
         }
-        String tag = str.substring(0, 5);
-        if (!tag.equals("VLT2:") && !tag.equals("VLT1:")) {
-            throw new IllegalArgumentException("decryptDatabase: bad vault format");
-        }
-        String payload = str.substring(5);
+        String tag = payload.substring(0, 5);
+        payload = payload.substring(5);
         int dot = payload.lastIndexOf('.');
         String body = payload.substring(0, dot);
         String checksum = payload.substring(dot + 1);

@@ -370,19 +370,41 @@
   }
 
   /**
+   * Pull the transport string ("VLT2:…"/"VLT1:…") out of a possibly larger
+   * text — the user may copy the whole chat message, not just the blob — and
+   * drop any trailing text. Returns "" when there is no transport string.
+   */
+  function extractTransport(str) {
+    var s = String(str == null ? '' : str).trim();
+    var at = s.indexOf('VLT2:');
+    if (at < 0) {
+      at = s.indexOf('VLT1:');
+    }
+    if (at < 0) {
+      return '';
+    }
+    s = s.slice(at);
+    for (var i = 0; i < s.length; i++) {
+      if (/\s/.test(s.charAt(i))) {
+        s = s.slice(0, i);
+        break;
+      }
+    }
+    return s;
+  }
+
+  /**
    * Decrypt a transport string back into { salt, kdf, version, entries }.
    * Accepts VLT2 (self-describing) and legacy VLT1 (PBKDF2 600k).
    * Throws on wrong password (GCM auth failure) or damaged copy (checksum).
    */
   async function decryptDatabase(str, password) {
-    if (typeof str !== 'string') {
+    var payload = extractTransport(str);
+    if (!payload) {
       throw new Error('decryptDatabase: bad vault format');
     }
-    var tag = str.slice(0, 5);
-    if (tag !== 'VLT2:' && tag !== 'VLT1:') {
-      throw new Error('decryptDatabase: bad vault format');
-    }
-    var payload = str.slice(5);
+    var tag = payload.slice(0, 5);
+    payload = payload.slice(5);
     var dot = payload.lastIndexOf('.');
     var body = payload.slice(0, dot);
     var checksum = payload.slice(dot + 1);
