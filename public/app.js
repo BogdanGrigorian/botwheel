@@ -31,7 +31,6 @@ const filterBar = document.getElementById("filter-bar");
 const filterLabel = document.getElementById("filter-label");
 const resetBtn = document.getElementById("reset-btn");
 const vaultMetaEl = document.getElementById("vault-meta");
-const lockBtn = document.getElementById("lock-btn");
 const cacheBar = document.getElementById("cache-bar");
 const cacheText = document.getElementById("cache-text");
 const cacheRefresh = document.getElementById("cache-refresh");
@@ -399,30 +398,6 @@ function enterMainScreen(entries) {
   mainScreen.hidden = false;
   render();
   searchInput.focus();
-}
-
-function lock() {
-  state.records = [];
-  state.query = "";
-  state.letter = null;
-  state.password = "";
-  state.vaultSalt = null;
-  state.kdf = null;
-  state.key = null;
-  state.selected = null;
-  state.editing = false;
-  state.editingId = null;
-  searchInput.value = "";
-  passwordInput.value = "";
-  updateStrength();
-  result.hidden = true;
-  detailsScreen.hidden = true;
-  saveScreen.hidden = true;
-  editForm.hidden = true;
-  detailsBody.hidden = false;
-  mainScreen.hidden = true;
-  lockScreen.hidden = false;
-  renderCacheBar();
 }
 
 // --- Rendering ---
@@ -977,7 +952,6 @@ lockForm.addEventListener("submit", (e) => {
   load();
 });
 passwordInput.addEventListener("input", updateStrength);
-lockBtn.addEventListener("click", lock);
 
 searchInput.addEventListener("input", () => {
   state.letter = null; // typing overrides the quick-letter filter
