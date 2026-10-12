@@ -11,13 +11,9 @@ AGENTS.md
 
 # --- Java build artifacts ---
 java/target/
+java/*.properties
 *.class
 
-# --- Generated test data ---
-test-vault.txt
-test-vault.decrypted.json
-
-# --- Local vault database (embedded H2) ---
-java/botwheel-db*.mv.db
-java/botwheel-db*.trace.db
-data/
+*.key
+*.db
+vault.txt*
