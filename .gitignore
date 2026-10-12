@@ -6,6 +6,9 @@ AGENTS.md
 # --- Editor/workspace settings (personal) ---
 .vscode/
 
+# --- IDE import folder (never read) ---
+.import/
+
 # --- Java build artifacts ---
 java/target/
 *.class
