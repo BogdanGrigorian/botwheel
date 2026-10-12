@@ -72,7 +72,7 @@ docker compose up -d
 - The bot token is a credential, not a crypto key.
 
 ### 4. Smoke test
-1. Message the bot `/start` → an **Open Vault** keyboard button appears below the message field; tap **Refresh database** to receive the vault string.
+1. Message the bot `/start` → an **Open Vault** keyboard button appears below the message field; tap **Refresh database** to receive the vault string — it arrives as a **code block, tap it to copy** in one tap.
 2. Open the Mini App **from the keyboard button** → enter the passphrase → records appear.
 3. Add or edit a record → the Mini App sends the new version to the bot automatically.
 4. Tap **Refresh database** again → the new version comes back.
