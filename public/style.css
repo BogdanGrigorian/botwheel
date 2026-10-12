@@ -502,7 +502,9 @@ body {
 }
 
 @media (prefers-color-scheme: light) {
-  :root {
+  /* Only the (default) theme follows the OS preference — explicitly picked
+     dark themes (prey/retro) must keep their own palettes. */
+  :root:not([data-theme="prey"]):not([data-theme="retro"]) {
     --bg: #e7ecf1;
     --card: #ffffff;
     --card-border: #d9e1e8;
@@ -553,8 +555,12 @@ body {
   min-height: 100dvh;
 }
 
-[data-theme="retro"] .main-screen {
-  background: transparent;
+/* Post-login screens share the login card's striped panel background. */
+[data-theme="retro"] .main-screen,
+[data-theme="retro"] .details-screen {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0px, rgba(255, 255, 255, 0.025) 1px, transparent 1px, transparent 3px),
+    var(--card);
 }
 
 .main-header {
@@ -793,9 +799,7 @@ body {
   min-height: 100dvh;
 }
 
-[data-theme="retro"] .details-screen {
-  background: transparent;
-}
+/* retro .details-screen uses the striped panel background (see .main-screen). */
 
 .details-header {
   display: flex;
