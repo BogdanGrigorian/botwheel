@@ -160,11 +160,21 @@ public final class BotwheelBot {
         }
         ensureMenuReset(chatId);
 
-        // A vault pushed by the Mini App via Telegram.WebApp.sendData() arrives
-        // as a service message; store it like an /update command.
+        // A message pushed by the Mini App via Telegram.WebApp.sendData() arrives
+        // as a service message: "/refresh" ("my cached copy is outdated"),
+        // "/start" ("no revision to verify against — re-send your keyboard") or a
+        // vault update to store like an /update command.
         Object webAppData = message.get("web_app_data");
         if (webAppData != null) {
-            storeVaultUpdate(userId, chatId, Json.str(Json.obj(webAppData).get("data")));
+            String data = Json.str(Json.obj(webAppData).get("data"));
+            String trimmed = data == null ? "" : data.trim();
+            if (trimmed.equals("/refresh") || trimmed.equals("refresh")) {
+                sendVault(userId, chatId);
+            } else if (trimmed.equals("/start") || trimmed.equals("/help")) {
+                welcome(userId, chatId);
+            } else {
+                storeVaultUpdate(userId, chatId, data);
+            }
             return;
         }
 

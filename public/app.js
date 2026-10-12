@@ -34,6 +34,7 @@ const vaultMetaEl = document.getElementById("vault-meta");
 const lockBtn = document.getElementById("lock-btn");
 const cacheBar = document.getElementById("cache-bar");
 const cacheText = document.getElementById("cache-text");
+const cacheRefresh = document.getElementById("cache-refresh");
 const cacheForget = document.getElementById("cache-forget");
 
 const detailsScreen = document.getElementById("details-screen");
@@ -253,6 +254,7 @@ function renderCacheBar() {
   const status = cacheStatus(cached);
   if (status === "none") {
     cacheBar.hidden = true;
+    cacheRefresh.hidden = true;
     preferredBlob = "";
     return;
   }
@@ -262,17 +264,37 @@ function renderCacheBar() {
 
   if (status === "current") {
     preferredBlob = cached.blob;
+    cacheRefresh.hidden = true;
+    cacheForget.hidden = false;
     const ts = fmtStamp(serverRevision.t || cached.t || cached.savedAt);
     cacheText.innerHTML = "Cached" + (ts ? " " + escapeHtml(ts) : "") +
       ', <span class="cache-verified">verified</span>';
   } else if (status === "stale") {
     preferredBlob = "";
+    // The Mini App can hand the bot a command over sendData() — but only when it
+    // was opened from the keyboard button (the only launch that can send).
+    const canPush = canSendData();
+    cacheRefresh.hidden = !canPush;
+    cacheForget.hidden = false;
+    cacheRefresh.dataset.cmd = "/refresh";
+    cacheRefresh.textContent = "Send /refresh";
     cacheText.innerHTML = "Cached " + escapeHtml(fmtStamp(cached.t || cached.savedAt)) +
-      ', <span class="cache-unverified">outdated</span> — tap “Refresh database”';
+      ', <span class="cache-unverified">outdated</span> — ' +
+      (canPush ? "send /refresh to pull the latest" : "tap “Refresh database” in the chat");
     pasteField.hidden = false;
   } else {
     preferredBlob = cached.blob;
-    cacheText.innerHTML = 'Cached, <span class="cache-unverified">unverified</span>';
+    // No revision in the link to compare against. Ask the bot for /start: it
+    // re-sends its keyboard with the Mini App URL stamped with the current
+    // revision, so the next launch can be verified. Forget is redundant here —
+    // the cached copy is kept until the user really replaces it.
+    const canPush = canSendData();
+    cacheRefresh.hidden = !canPush;
+    cacheForget.hidden = true;
+    cacheRefresh.dataset.cmd = "/start";
+    cacheRefresh.textContent = "Send /start";
+    cacheText.innerHTML = 'Cached, <span class="cache-unverified">unverified</span> — ' +
+      (canPush ? "send /start to refresh the chat button" : "open the vault from the chat button");
   }
 }
 
@@ -1094,6 +1116,26 @@ themeButtons.forEach((btn) => {
 });
 
 // --- Cache controls ---
+// "Send /refresh" (stale) or "Send /start" (unverified): hands the bot a command
+// over sendData(), which closes the Mini App, so the bot's reply lands in the
+// chat. Only keyboard-button launches can send; elsewhere the button is hidden.
+cacheRefresh.addEventListener("click", () => {
+  if (!canSendData()) return;
+  try {
+    tg.sendData(cacheRefresh.dataset.cmd || "/refresh");
+  } catch (e) {
+    showResult("This client refused the automatic send — tap “Refresh database” in the chat instead.", true);
+    return;
+  }
+  // If the app is still visible a moment later the client almost certainly
+  // ignored the send (e.g. an inline/menu/direct-link launch).
+  setTimeout(() => {
+    if (document.visibilityState === "visible") {
+      showResult("The client didn’t deliver the command — tap “Refresh database” in the chat instead.", true);
+    }
+  }, 1200);
+});
+
 cacheForget.addEventListener("click", () => {
   clearCache();
   cacheBar.hidden = true;
