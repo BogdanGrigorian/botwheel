@@ -216,9 +216,10 @@ public final class ImportCsv {
         Set<String> knownIds = new HashSet<>();   // content ids already in the vault
         int existingCount = 0;
         boolean replacing = false;
+        boolean existingOutput = Files.isRegularFile(vaultOut);
         String headerB64 = null;
 
-        if (!freshRequested && Files.isRegularFile(vaultOut)) {
+        if (!freshRequested && existingOutput) {
             String existing;
             try {
                 existing = new String(Files.readAllBytes(vaultOut), StandardCharsets.UTF_8).trim();
@@ -381,7 +382,9 @@ public final class ImportCsv {
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            if (replacing) {
+            if (existingOutput) {
+                // --fresh overwrites without reading the old file first, so the
+                // backup has to happen here, not only in the append path.
                 backup = vaultOut.resolveSibling(vaultOut.getFileName() + ".bak");
                 Files.copy(vaultOut, backup, StandardCopyOption.REPLACE_EXISTING);
             }
