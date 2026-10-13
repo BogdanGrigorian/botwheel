@@ -53,7 +53,9 @@ badarg() {
 
 # --- locate ourselves so the default target is stable -----------------------
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 3
-KEYFILE="$SCRIPT_DIR/java/botwheel-db.key"
+# ROOT is the repo root (java/ is a sibling of script/, not a child of it).
+ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd) || exit 3
+KEYFILE="$ROOT/java/botwheel-db.key"
 KEYSET=
 FORCE=
 PRINT=

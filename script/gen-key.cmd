@@ -29,7 +29,9 @@ rem              4 key file exists without --force, 5 verification failed.
 rem ===========================================================================
 
 set "SCRIPT_DIR=%~dp0"
-set "KEYFILE=%SCRIPT_DIR%java\botwheel-db.key"
+rem  ROOT is the repo root (java\ is a sibling of script\, not a child of it).
+set "ROOT=%SCRIPT_DIR%.."
+set "KEYFILE=%ROOT%\java\botwheel-db.key"
 set "KEYSET="
 set "FORCE="
 set "PRINT="

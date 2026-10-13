@@ -13,7 +13,7 @@ rem    csv-file      comma separated, Excel quoting, first row = header (skipped
 rem                  legacy:  Description 1, Description 2, Username, Password, Email, Note
 rem                  browser: name, url, username, password, note   (--browser-vault)
 rem    vault-out     vault container to add the records to
-rem                  (default: vault.txt next to this script). When it already exists
+rem                  (default: vault.txt at the repo root). When it already exists
 rem                  the file is opened with the passphrase and the CSV rows are
 rem                  APPENDED to its records; that vault's header (KDF + salt) is
 rem                  reused, so the records already inside it keep decrypting. The
@@ -64,8 +64,12 @@ rem  java\target\classes and Bouncy Castle in the local Maven repo.
 rem ===========================================================================
 
 set "SCRIPT_DIR=%~dp0"
+rem  ROOT is the repo root: this script lives in script\, and the java\ project is
+rem  a sibling of script\, not a child of it. Deriving it here means the script
+rem  works no matter which directory it is launched from.
+set "ROOT=%SCRIPT_DIR%.."
 set "CSV="
-set "VAULT=%SCRIPT_DIR%vault.txt"
+set "VAULT=%ROOT%\vault.txt"
 set "VAULT_SET="
 set "PASSFILE=%SCRIPT_DIR%passphrase.key"
 set "PASS_SET="
@@ -158,12 +162,12 @@ if not exist "%PASSFILE%" (
 )
 
 rem --- the compiled crypto port ----------------------------------------------
-set "CLASSES_DIR=%SCRIPT_DIR%java\target\classes"
+set "CLASSES_DIR=%ROOT%\java\target\classes"
 if exist "%CLASSES_DIR%\com\botwheel\CryptoCore.class" goto :haveclasses
 
 echo java\target\classes is missing - building it ^(mvnw -q compile^) ...
-pushd "%SCRIPT_DIR%java"
-call "%SCRIPT_DIR%java\mvnw.cmd" -q compile
+pushd "%ROOT%\java"
+call "%ROOT%\java\mvnw.cmd" -q compile
 set "MVNRC=%ERRORLEVEL%"
 popd
 if not "%MVNRC%"=="0" goto :buildfail
@@ -220,7 +224,8 @@ echo   csv-file          CSV exported from Excel or a browser password manager
 echo                     ^(header row skipped^):
 echo                       legacy:  Description 1,Description 2,Username,Password,Email,Note
 echo                       browser: name,url,username,password,note   ^(--browser-vault^)
-echo   vault-out         vault container to add the records to (default: vault.txt)
+echo   vault-out         vault container to add the records to (default: vault.txt
+echo                     at the repo root)
 echo                     if it exists the rows are APPENDED to it and the old file
 echo                     is kept as ^<vault^>.bak
 echo   --fresh           start a new vault, ignoring the existing one

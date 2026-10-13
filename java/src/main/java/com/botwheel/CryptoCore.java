@@ -441,7 +441,7 @@ public final class CryptoCore {
         String payload = extractTransport(str);
         if (payload.isEmpty()) {
             throw new IllegalArgumentException(
-                    "parseVaultStructure: not a vault string (expected \"VLT3:…\")");
+                    "parseVaultStructure: not a vault string (expected \"VLT3:...\")");
         }
         String body = payload.substring(VAULT_PREFIX.length());
         int dot = body.lastIndexOf('.');
