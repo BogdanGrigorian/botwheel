@@ -15,7 +15,7 @@ import java.util.Set;
  *
  *   telegram.bot.token   / TELEGRAM_BOT_TOKEN   (required)
  *   telegram.miniapp.url / MINIAPP_URL          (GitHub Pages URL of the Mini App)
- *   telegram.seed.file   / TELEGRAM_SEED_FILE   (optional demo vault blob)
+ *   telegram.seed.file   / TELEGRAM_SEED_FILE   (optional VLT3 container; split into rows on a user's first /start)
  *   telegram.allowed.user.ids / TELEGRAM_ALLOWED_USER_IDS (optional allowlist)
  *   telegram.db.path     / TELEGRAM_DB_PATH      (embedded H2 database location)
  *   telegram.db.key      / TELEGRAM_DB_KEY       (optional base64 32-byte server key)

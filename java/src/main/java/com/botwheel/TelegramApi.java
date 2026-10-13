@@ -91,11 +91,30 @@ public final class TelegramApi {
         return call("sendMessage", params);
     }
 
-    /** Upload a document (used for vaults that don't fit in a 4096-char message). */
+    /** Upload a document (the vault container always goes out as a .txt file). */
     public Map<String, Object> sendDocument(long chatId, String filename, String content)
             throws IOException, InterruptedException {
+        return sendDocument(chatId, filename, content, null, null);
+    }
+
+    /** Upload a document with an optional caption. */
+    public Map<String, Object> sendDocument(long chatId, String filename, String content, String caption)
+            throws IOException, InterruptedException {
+        return sendDocument(chatId, filename, content, caption, null);
+    }
+
+    /**
+     * Upload a document with an optional caption and reply keyboard. The keyboard
+     * matters for the vault: its Mini App URL carries the vault revision, so the
+     * refresh has to re-send it (otherwise the freshly pasted copy would look
+     * stale against the old stamp).
+     */
+    public Map<String, Object> sendDocument(long chatId, String filename, String content,
+            String caption, Map<String, Object> replyMarkup)
+            throws IOException, InterruptedException {
         String boundary = "----tg" + System.nanoTime();
-        byte[] body = multipartBody(boundary, chatId, filename, content);
+        byte[] body = multipartBody(boundary, chatId, filename, content, caption,
+                replyMarkup == null ? null : Json.encode(replyMarkup));
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "sendDocument"))
                 .timeout(Duration.ofSeconds(65))
@@ -146,11 +165,22 @@ public final class TelegramApi {
         return call("setMyCommands", params);
     }
 
-    private static byte[] multipartBody(String boundary, long chatId, String filename, String content) {
+    private static byte[] multipartBody(String boundary, long chatId, String filename, String content,
+            String caption, String replyMarkupJson) {
         StringBuilder sb = new StringBuilder();
         sb.append("--").append(boundary).append("\r\n");
         sb.append("Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n");
         sb.append(chatId).append("\r\n");
+        if (caption != null && !caption.isEmpty()) {
+            sb.append("--").append(boundary).append("\r\n");
+            sb.append("Content-Disposition: form-data; name=\"caption\"\r\n\r\n");
+            sb.append(caption).append("\r\n");
+        }
+        if (replyMarkupJson != null) {
+            sb.append("--").append(boundary).append("\r\n");
+            sb.append("Content-Disposition: form-data; name=\"reply_markup\"\r\n\r\n");
+            sb.append(replyMarkupJson).append("\r\n");
+        }
         sb.append("--").append(boundary).append("\r\n");
         sb.append("Content-Disposition: form-data; name=\"document\"; filename=\"")
                 .append(filename).append("\"\r\n");

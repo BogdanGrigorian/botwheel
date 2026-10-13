@@ -30,12 +30,18 @@ import org.bouncycastle.crypto.params.Argon2Parameters;
  * Produces the exact same output formats as the browser version, so a vault
  * generated here can be opened by the Mini App and vice versa:
  *
- *   Field (self-contained):  "s1.<base64url(salt || iv || ct || tag)>"
- *   Field (with key):        "s1.<base64url(iv || ct || tag)>"
- *   Vault (transport):       "VLT2:<base64url(header || salt || iv || ct || tag)>.<8-hex-checksum>"
- *   Vault (legacy):          "VLT1:<base64url(salt || iv || ct || tag)>.<8-hex-checksum>"
+ *   Record (one row):    "r1.<base64url(iv || ct || tag)>"
+ *                        plaintext = canonical JSON {n,u,o,l,e,p}
+ *   Vault header:        base64url( kdfHeader(13) || salt(16) )   (the "key spec")
+ *   Vault (container):   "VLT3:<base64url(header || gzip(recordsJson))>.<8-hex>"
+ *                        recordsJson = [{"i":"<recordId>","d":"r1.…"}, …]
+ *   Update payload:      "VUP1:<headerB64>\nadd:<id>:<r1.…>\ndel:<id>\nnote: …"
  *
- * The VLT2 header (13 bytes, little-endian) self-describes the KDF:
+ * The database is a set of independently encrypted records; the container is
+ * the header plus those opaque records (no whole-vault encryption), so the
+ * server can assemble it from its rows without ever seeing the password.
+ *
+ * The 13-byte KDF header (little-endian) self-describes the key derivation:
  *   id(1) || p1(4) || p2(4) || p3(4)
  *   argon2id: p1 = memory KiB, p2 = iterations, p3 = parallelism
  *   pbkdf2  : p1 = iterations
@@ -49,10 +55,17 @@ public final class CryptoCore {
     public static final int SALT_BYTES = 16;             // PBKDF2/Argon2 salt
     public static final int IV_BYTES = 12;               // AES-GCM nonce (96-bit)
 
-    // KDF identifiers + VLT2 header layout.
+    // KDF identifiers + vault header layout.
     public static final int KDF_PBKDF2 = 1;
     public static final int KDF_ARGON2ID = 2;
     public static final int HEADER_BYTES = 13;           // id(1) || p1(4) || p2(4) || p3(4)
+    public static final int HEADER_SALT_BYTES = HEADER_BYTES + SALT_BYTES; // 29 - the vault key spec
+
+    // Record + container formats.
+    public static final String RECORD_PREFIX = "r1.";
+    public static final String VAULT_PREFIX = "VLT3:";
+    public static final String OP_PREFIX = "VUP1:";
+    public static final int RECORD_ID_HEX = 16;          // chars taken from the record-id hash
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -63,63 +76,51 @@ public final class CryptoCore {
     // ------------------------------------------------------------------
 
     /**
-     * A stored record.
-     * n = name/title (mandatory), u = url/domain (optional), o = notes (optional),
-     * l = login/username (optional, plaintext), e = email (optional, plaintext),
-     * s = encrypted password (mandatory).
+     * A plaintext record (client-side shape).
+     * n = title (mandatory), u = url (optional), o = notes (optional),
+     * l = login (optional), e = email (optional), p = password (mandatory).
+     * Every field is encrypted together inside the record's ciphertext, so the
+     * server never sees any of them.
      */
-    public static class Entry {
+    public static class Record {
         public String n;
         public String u;
         public String o;
         public String l;
         public String e;
-        public String s;
+        public String p;
 
-        public Entry() {}
+        public Record() {}
 
-        public Entry(String n, String u, String o, String s) {
-            this(n, u, o, null, null, s);
-        }
-
-        public Entry(String n, String u, String o, String l, String e, String s) {
+        public Record(String n, String u, String o, String l, String e, String p) {
             this.n = n;
             this.u = u;
             this.o = o;
             this.l = l;
             this.e = e;
-            this.s = s;
+            this.p = p;
         }
     }
 
-    /** A record after decryption. */
-    public static class DecryptedEntry {
-        public String n;
-        public String u;
-        public String o;
-        public String l;
-        public String e;
-        public String password;
+    /** One stored database row: its content id + opaque ciphertext. */
+    public static class StoredRecord {
+        public final String id;
+        public final String cipher;
 
-        public DecryptedEntry(String n, String u, String o, String l, String e, String password) {
-            this.n = n;
-            this.u = u;
-            this.o = o;
-            this.l = l;
-            this.e = e;
-            this.password = password;
+        public StoredRecord(String id, String cipher) {
+            this.id = id;
+            this.cipher = cipher;
         }
     }
 
-    /** Result of decryptDatabase(). */
-    public static class Vault {
-        public byte[] salt;
-        public KdfParams kdf;
-        public int version;
-        public List<Entry> entries;
+    /** A parsed container (header + rows); no password needed. */
+    public static class VaultStructure {
+        public String headerB64;
+        public String checksum;
+        public List<StoredRecord> records;
     }
 
-    /** KDF choice carried in the VLT2 header (mirrors normalizeKdf in JS). */
+    /** KDF choice carried in the vault header (mirrors normalizeKdf in JS). */
     public static final class KdfParams {
         public final String id;   // "argon2id" | "pbkdf2"
         public final int memoryKiB;
@@ -178,7 +179,7 @@ public final class CryptoCore {
     // Key derivation + AES-GCM
     // ------------------------------------------------------------------
 
-    /** PBKDF2-SHA256 -> 256-bit AES key (legacy VLT1 path). */
+    /** PBKDF2-SHA256 -> 256-bit AES key (legacy). */
     public static SecretKeySpec deriveKey(String password, byte[] salt, int iterations) throws Exception {
         KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, 256);
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
@@ -209,7 +210,7 @@ public final class CryptoCore {
         return deriveKey(password, salt, kdf != null ? kdf.iterations : DEFAULT_ITERATIONS);
     }
 
-    // --- Self-describing KDF header (VLT2), 13 bytes, little-endian ---
+    // --- Self-describing KDF header, 13 bytes, little-endian ---
 
     private static void writeU32(byte[] b, int off, int v) {
         b[off] = (byte) (v & 0xff);
@@ -245,7 +246,7 @@ public final class CryptoCore {
         if (id == KDF_PBKDF2) {
             return KdfParams.pbkdf2(readU32(b, 1));
         }
-        throw new IllegalArgumentException("decryptDatabase: unknown KDF id " + id);
+        throw new IllegalArgumentException("decodeKdfHeader: unknown KDF id " + id);
     }
 
     /** AES-256-GCM encrypt. Returns iv || ciphertext || tag. */
@@ -291,91 +292,137 @@ public final class CryptoCore {
     }
 
     // ------------------------------------------------------------------
-    // Field encryption
+    // Records (one independently encrypted database row)
     // ------------------------------------------------------------------
 
-    /** Encrypt a single string with a password (self-contained salt). */
-    public static String encryptSecret(String plaintext, String password) throws Exception {
-        return encryptSecret(plaintext, password, DEFAULT_ITERATIONS);
+    /** Canonical JSON of a record - fixed key order, no stray whitespace. */
+    public static String canonicalRecord(Record r) {
+        return canonicalRecord(r.n, r.u, r.o, r.l, r.e, r.p);
     }
 
-    public static String encryptSecret(String plaintext, String password, int iterations) throws Exception {
-        byte[] salt = randomBytes(SALT_BYTES);
-        SecretKeySpec key = deriveKey(password, salt, iterations);
-        byte[] enc = aesEncrypt(key, plaintext.getBytes(StandardCharsets.UTF_8));
-        return "s1." + toBase64url(concat(salt, enc));
+    public static String canonicalRecord(String n, String u, String o, String l, String e, String p) {
+        return "{\"n\":" + jsonString(n)
+                + ",\"u\":" + jsonString(u)
+                + ",\"o\":" + jsonString(o)
+                + ",\"l\":" + jsonString(l)
+                + ",\"e\":" + jsonString(e)
+                + ",\"p\":" + jsonString(p) + "}";
     }
 
-    public static String decryptSecret(String encoded, String password) throws Exception {
-        return decryptSecret(encoded, password, DEFAULT_ITERATIONS);
+    /** Content hash of a record: the row key it is stored under. */
+    public static String recordId(String canonicalJson) throws Exception {
+        return sha256Hex(canonicalJson).substring(0, RECORD_ID_HEX);
     }
 
-    public static String decryptSecret(String encoded, String password, int iterations) throws Exception {
-        if (encoded == null || !encoded.startsWith("s1.")) {
-            throw new IllegalArgumentException("decryptSecret: bad field format");
+    /** Encrypt one record with the vault key -> "r1.<base64url(iv||ct||tag)>". */
+    public static String encryptRecord(SecretKeySpec key, String canonicalJson) throws Exception {
+        byte[] enc = aesEncrypt(key, canonicalJson.getBytes(StandardCharsets.UTF_8));
+        return RECORD_PREFIX + toBase64url(enc);
+    }
+
+    /** Reverse of encryptRecord -> a plaintext Record. */
+    public static Record decryptRecord(SecretKeySpec key, String cipher) throws Exception {
+        if (cipher == null || !cipher.startsWith(RECORD_PREFIX)) {
+            throw new IllegalArgumentException("decryptRecord: bad record format");
         }
-        byte[] raw = fromBase64url(encoded.substring(3));
-        byte[] salt = Arrays.copyOfRange(raw, 0, SALT_BYTES);
-        byte[] enc = Arrays.copyOfRange(raw, SALT_BYTES, raw.length);
-        SecretKeySpec key = deriveKey(password, salt, iterations);
-        return new String(aesDecrypt(key, enc), StandardCharsets.UTF_8);
+        byte[] enc = fromBase64url(cipher.substring(RECORD_PREFIX.length()));
+        return parseRecord(new String(aesDecrypt(key, enc), StandardCharsets.UTF_8));
     }
 
-    /** Bulk: encrypt with an already-derived key (no salt inside). */
-    public static String encryptWithKey(SecretKeySpec key, String plaintext) throws Exception {
-        byte[] enc = aesEncrypt(key, plaintext.getBytes(StandardCharsets.UTF_8));
-        return "s1." + toBase64url(enc);
-    }
-
-    public static String decryptWithKey(SecretKeySpec key, String encoded) throws Exception {
-        if (encoded == null || !encoded.startsWith("s1.")) {
-            throw new IllegalArgumentException("decryptWithKey: bad field format");
+    /** Parse a canonical record JSON back into a Record. */
+    public static Record parseRecord(String json) {
+        Object root = new JsonParser(json).parse();
+        if (!(root instanceof Map)) {
+            throw new IllegalArgumentException("record JSON must be an object");
         }
-        byte[] enc = fromBase64url(encoded.substring(3));
-        return new String(aesDecrypt(key, enc), StandardCharsets.UTF_8);
+        Map<?, ?> m = (Map<?, ?>) root;
+        Record r = new Record();
+        r.n = asString(m.get("n"));
+        r.u = asString(m.get("u"));
+        r.o = asString(m.get("o"));
+        r.l = asString(m.get("l"));
+        r.e = asString(m.get("e"));
+        r.p = asString(m.get("p"));
+        return r;
+    }
+
+    private static String asString(Object o) {
+        return o == null ? "" : (String) o;
     }
 
     // ------------------------------------------------------------------
-    // Whole-database (vault) encryption
+    // Vault header (KDF params + salt) shared by every record
     // ------------------------------------------------------------------
 
-    public static String encryptDatabase(List<Entry> entries, String password) throws Exception {
-        return encryptDatabase(entries, password, null, KdfParams.DEFAULT_ARGON2);
+    /** base64url(kdfHeader(13) || salt(16)). */
+    public static String encodeVaultHeader(KdfParams kdf, byte[] salt) {
+        return toBase64url(concat(encodeKdfHeader(kdf), salt));
     }
 
-    public static String encryptDatabase(List<Entry> entries, String password, byte[] salt, KdfParams kdf)
-            throws Exception {
-        if (salt == null) {
-            salt = randomBytes(SALT_BYTES);
-        }
-        if (kdf == null) {
-            kdf = KdfParams.DEFAULT_ARGON2;
-        }
-        SecretKeySpec key = deriveKey(password, salt, kdf);
-        byte[] json = toJson(entries).getBytes(StandardCharsets.UTF_8);
-        byte[] gz = gzip(json);
-        byte[] enc = aesEncrypt(key, gz);
+    public static KdfParams headerKdf(String headerB64) {
+        return decodeKdfHeader(Arrays.copyOfRange(fromBase64url(headerB64), 0, HEADER_BYTES));
+    }
 
-        String body = toBase64url(concat(encodeKdfHeader(kdf), salt, enc));
-        String checksum = sha256Hex(body).substring(0, 8);
+    public static byte[] headerSalt(String headerB64) {
+        byte[] raw = fromBase64url(headerB64);
+        if (raw.length != HEADER_SALT_BYTES) {
+            throw new IllegalArgumentException("vault header: expected " + HEADER_SALT_BYTES
+                    + " bytes, got " + raw.length);
+        }
+        return Arrays.copyOfRange(raw, HEADER_BYTES, HEADER_SALT_BYTES);
+    }
 
-        return "VLT2:" + body + "." + checksum;
+    /** A fresh vault header (Argon2id defaults + a new salt). */
+    public static String newVaultHeader() {
+        return encodeVaultHeader(KdfParams.DEFAULT_ARGON2, randomBytes(SALT_BYTES));
+    }
+
+    // ------------------------------------------------------------------
+    // The container (VLT3): header + gzip(records) + a content revision
+    // ------------------------------------------------------------------
+
+    /** Content revision of a record set -> the container suffix / the "?c=" stamp. */
+    public static String revisionOf(List<StoredRecord> records) throws Exception {
+        List<StoredRecord> sorted = new ArrayList<>(records);
+        sorted.sort((a, b) -> a.id.compareTo(b.id));
+        StringBuilder sb = new StringBuilder();
+        for (StoredRecord r : sorted) {
+            sb.append(r.id).append(':').append(r.cipher).append('\n');
+        }
+        return sha256Hex(sb.toString()).substring(0, 8);
+    }
+
+    private static String recordsJson(List<StoredRecord> records) {
+        List<StoredRecord> sorted = new ArrayList<>(records);
+        sorted.sort((a, b) -> a.id.compareTo(b.id));
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < sorted.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"i\":").append(jsonString(sorted.get(i).id))
+              .append(",\"d\":").append(jsonString(sorted.get(i).cipher)).append('}');
+        }
+        return sb.append(']').toString();
+    }
+
+    /** Assemble "VLT3:<base64url(header || gzip(records))>.<8hex>". */
+    public static String buildVault(String headerB64, List<StoredRecord> records) throws Exception {
+        byte[] gz = gzip(recordsJson(records).getBytes(StandardCharsets.UTF_8));
+        String body = toBase64url(concat(fromBase64url(headerB64), gz));
+        return VAULT_PREFIX + body + "." + revisionOf(records);
     }
 
     /**
-     * Pull the transport string ("VLT2:…"/"VLT1:…") out of a possibly larger
-     * text — the user may copy the whole chat message, not just the blob — and
-     * drop any trailing text. Returns "" when there is no transport string.
+     * Pull the container ("VLT3:…") out of a possibly larger text - the user may
+     * copy the whole file content - and drop any trailing text. "" when absent.
      */
-    private static String extractTransport(String str) {
+    public static String extractTransport(String str) {
         if (str == null) {
             return "";
         }
         String s = str.trim();
-        int at = s.indexOf("VLT2:");
-        if (at < 0) {
-            at = s.indexOf("VLT1:");
-        }
+        int at = s.indexOf(VAULT_PREFIX);
         if (at < 0) {
             return "";
         }
@@ -389,72 +436,43 @@ public final class CryptoCore {
         return s;
     }
 
-    public static Vault decryptDatabase(String str, String password) throws Exception {
+    /** Split a container into its header + opaque rows. No password needed. */
+    public static VaultStructure parseVaultStructure(String str) throws Exception {
         String payload = extractTransport(str);
         if (payload.isEmpty()) {
-            throw new IllegalArgumentException("decryptDatabase: bad vault format");
+            throw new IllegalArgumentException(
+                    "parseVaultStructure: not a vault string (expected \"VLT3:…\")");
         }
-        String tag = payload.substring(0, 5);
-        payload = payload.substring(5);
-        int dot = payload.lastIndexOf('.');
-        String body = payload.substring(0, dot);
-        String checksum = payload.substring(dot + 1);
-
-        String expected = sha256Hex(body).substring(0, 8);
-        if (!checksum.equals(expected)) {
-            throw new IllegalArgumentException("decryptDatabase: checksum mismatch (damaged copy?)");
+        String body = payload.substring(VAULT_PREFIX.length());
+        int dot = body.lastIndexOf('.');
+        if (dot < 0) {
+            throw new IllegalArgumentException("parseVaultStructure: missing checksum");
         }
-
-        byte[] raw = fromBase64url(body);
-        KdfParams kdf;
-        byte[] salt;
-        byte[] enc;
-        if (tag.equals("VLT2:")) {
-            kdf = decodeKdfHeader(Arrays.copyOfRange(raw, 0, HEADER_BYTES));
-            salt = Arrays.copyOfRange(raw, HEADER_BYTES, HEADER_BYTES + SALT_BYTES);
-            enc = Arrays.copyOfRange(raw, HEADER_BYTES + SALT_BYTES, raw.length);
-        } else {
-            kdf = KdfParams.pbkdf2(DEFAULT_ITERATIONS);
-            salt = Arrays.copyOfRange(raw, 0, SALT_BYTES);
-            enc = Arrays.copyOfRange(raw, SALT_BYTES, raw.length);
+        String checksum = body.substring(dot + 1);
+        byte[] raw = fromBase64url(body.substring(0, dot));
+        if (raw.length < HEADER_SALT_BYTES) {
+            throw new IllegalArgumentException("parseVaultStructure: truncated container");
         }
-        SecretKeySpec key = deriveKey(password, salt, kdf);
-        byte[] gz = aesDecrypt(key, enc); // wrong password => AEADBadTagException
-
-        Vault vault = parseJson(new String(gunzip(gz), StandardCharsets.UTF_8));
-        vault.salt = salt;
-        vault.kdf = kdf;
-        return vault;
+        byte[] gz = Arrays.copyOfRange(raw, HEADER_SALT_BYTES, raw.length);
+        Object root = new JsonParser(new String(gunzip(gz), StandardCharsets.UTF_8)).parse();
+        List<StoredRecord> records = new ArrayList<>();
+        for (Object o : (List<?>) root) {
+            Map<?, ?> m = (Map<?, ?>) o;
+            records.add(new StoredRecord((String) m.get("i"), (String) m.get("d")));
+        }
+        VaultStructure out = new VaultStructure();
+        out.headerB64 = toBase64url(Arrays.copyOfRange(raw, 0, HEADER_SALT_BYTES));
+        out.checksum = checksum;
+        out.records = records;
+        return out;
     }
 
-    /** Unwrap every record's `s` field (encrypted password) into { n, u, o, l, e, password }. */
-    public static List<DecryptedEntry> decryptEntries(List<Entry> entries, String password, byte[] salt)
-            throws Exception {
-        return decryptEntries(entries, password, salt, KdfParams.pbkdf2(DEFAULT_ITERATIONS));
-    }
-
-    public static List<DecryptedEntry> decryptEntries(List<Entry> entries, String password, byte[] salt, int iterations)
-            throws Exception {
-        return decryptEntries(entries, password, salt, KdfParams.pbkdf2(iterations));
-    }
-
-    public static List<DecryptedEntry> decryptEntries(List<Entry> entries, String password, byte[] salt, KdfParams kdf)
-            throws Exception {
-        SecretKeySpec key = deriveKey(password, salt, kdf);
-        List<DecryptedEntry> out = new ArrayList<>();
-        for (Entry e : entries) {
-            String secret = decryptWithKey(key, e.s);
-            int sep = secret.indexOf('\u0000');
-            String login = e.l != null ? e.l : "";
-            String pass;
-            if (sep != -1) {
-                // legacy "username\0password"
-                login = secret.substring(0, sep);
-                pass = secret.substring(sep + 1);
-            } else {
-                pass = secret;
-            }
-            out.add(new DecryptedEntry(e.n, e.u, e.o, login, e.e != null ? e.e : "", pass));
+    /** Decrypt every row of a container -> plaintext records (same order). */
+    public static List<Record> openRecords(VaultStructure vault, String password) throws Exception {
+        SecretKeySpec key = deriveKey(password, headerSalt(vault.headerB64), headerKdf(vault.headerB64));
+        List<Record> out = new ArrayList<>();
+        for (StoredRecord r : vault.records) {
+            out.add(decryptRecord(key, r.cipher));
         }
         return out;
     }
@@ -462,27 +480,6 @@ public final class CryptoCore {
     // ------------------------------------------------------------------
     // Minimal JSON (only the schema we produce/consume)
     // ------------------------------------------------------------------
-
-    /** Serialize entries to {"version":3,"entries":[{n,u,o,l,e,s},...]}. */
-    public static String toJson(List<Entry> entries) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"version\":3,\"entries\":[");
-        for (int i = 0; i < entries.size(); i++) {
-            if (i > 0) {
-                sb.append(',');
-            }
-            Entry e = entries.get(i);
-            sb.append("{\"n\":").append(jsonString(e.n))
-              .append(",\"u\":").append(jsonString(e.u))
-              .append(",\"o\":").append(jsonString(e.o))
-              .append(",\"l\":").append(jsonString(e.l))
-              .append(",\"e\":").append(jsonString(e.e))
-              .append(",\"s\":").append(jsonString(e.s))
-              .append('}');
-        }
-        sb.append("]}");
-        return sb.toString();
-    }
 
     /** JSON-escape a string (public so callers can reuse it). */
     public static String jsonString(String s) {
@@ -510,30 +507,6 @@ public final class CryptoCore {
         }
         sb.append('"');
         return sb.toString();
-    }
-
-    /** Parse the JSON we produce into a Vault (version + entries). */
-    public static Vault parseJson(String jsonStr) {
-        Object root = new JsonParser(jsonStr).parse();
-        if (!(root instanceof Map)) {
-            throw new IllegalArgumentException("vault JSON must be an object");
-        }
-        Map<?, ?> m = (Map<?, ?>) root;
-        Vault v = new Vault();
-        v.version = ((Number) m.get("version")).intValue();
-        List<Entry> entries = new ArrayList<>();
-        for (Object o : (List<?>) m.get("entries")) {
-            Map<?, ?> em = (Map<?, ?>) o;
-            entries.add(new Entry(
-                    (String) em.get("n"),
-                    (String) em.get("u"),
-                    (String) em.get("o"),
-                    (String) em.get("l"),
-                    (String) em.get("e"),
-                    (String) em.get("s")));
-        }
-        v.entries = entries;
-        return v;
     }
 
     private static byte[] concat(byte[]... arrays) {

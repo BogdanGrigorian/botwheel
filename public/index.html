@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Botwheel Vault</title>
-  <link rel="stylesheet" href="style.css?v=13" />
+  <link rel="stylesheet" href="style.css?v=14" />
   <script>
     try {
       var botwheelTheme = localStorage.getItem("botwheel-theme") || "default";
@@ -84,7 +84,7 @@
           id="paste-area"
           class="textarea"
           rows="2"
-          placeholder="VLT2:..."
+          placeholder="VLT3:..."
           spellcheck="false"
         ></textarea>
       </div>
@@ -138,6 +138,7 @@
         <span id="details-title" class="details-title">Record details</span>
         <span class="details-spacer" aria-hidden="true"></span>
         <span id="details-status" class="details-status" hidden></span>
+        <button id="details-delete" class="mini-btn danger" type="button" hidden>Delete</button>
         <button id="details-edit" class="mini-btn" type="button">Edit</button>
       </header>
 
@@ -227,24 +228,24 @@
       </header>
 
       <div class="details-body">
-        <p id="save-hint" class="save-hint">Your changes are stored in this browser. To save the new version on the bot, send it the command below — it has already been copied to your clipboard.</p>
+        <p id="save-hint" class="save-hint">Your change is stored in this browser. To save it on the bot, send the update below — it has already been copied to your clipboard.</p>
 
         <label class="detail-field">
-          <span class="field-label">Update command</span>
+          <span class="field-label">Update payload</span>
           <textarea id="save-command" class="textarea save-command" rows="4" readonly spellcheck="false"></textarea>
         </label>
 
         <button id="save-send" class="button" type="button" hidden>Send to bot</button>
         <button id="save-copy" class="button" type="button">Copy command</button>
 
-        <p class="save-note">The bot only stores the encrypted vault — your password never leaves this device.</p>
+        <p class="save-note">The bot only stores the encrypted records — your password never leaves this device.</p>
       </div>
     </section>
 
   </main>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="crypto-core.js?v=12"></script>
-  <script src="app.js?v=15"></script>
+  <script src="crypto-core.js?v=13"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

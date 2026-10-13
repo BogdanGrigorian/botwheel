@@ -7,7 +7,8 @@ telegram.bot.token=1234567890:AA...replace-me...
 # GitHub Pages URL of the Mini App (public/ folder)
 telegram.miniapp.url=https://bogdangrigorian.github.io/botwheel/
 
-# Optional: a pre-generated VLT2 vault blob used as the demo seed for new users.
+# Optional: a pre-generated vault container (VLT3) used as the seed for a new
+# user. On that user's first /start the bot splits it into one row per record.
 # Leave empty to start with empty vaults.
 telegram.seed.file=test-vault.txt
 
@@ -15,14 +16,14 @@ telegram.seed.file=test-vault.txt
 # Leave empty to allow everyone.
 telegram.allowed.user.ids=
 
-# Optional: embedded H2 database location for the stored vaults.
+# Optional: embedded H2 database location for the stored records.
 # Relative paths are resolved against the working directory; H2 appends .mv.db.
 telegram.db.path=botwheel-db
 
-# Optional: server-side "at rest" encryption of the stored blob.
-# The bot wraps each vault with this key before writing it to the database and
-# unwraps it only to hand it back over chat. This protects the DB file if it is
-# stolen (backups, disk dumps) — the key is a SEPARATE asset.
+# Optional: server-side "at rest" encryption of the stored header and records.
+# The bot wraps each stored value with this key before writing it to the database
+# and unwraps it only to assemble the vault container over chat. This protects the
+# DB file if it is stolen (backups, disk dumps) — the key is a SEPARATE asset.
 #
 # Provide the key either inline (base64, 32 bytes) ...
 # telegram.db.key=

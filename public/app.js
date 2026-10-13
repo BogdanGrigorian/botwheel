@@ -68,6 +68,7 @@ const saveCommand = document.getElementById("save-command");
 const saveCopy = document.getElementById("save-copy");
 const saveSend = document.getElementById("save-send");
 const saveHint = document.getElementById("save-hint");
+const detailsDeleteBtn = document.getElementById("details-delete");
 
 // Version of the running build (the "?v=" from this script's own URL).
 if (appVersionEl) {
@@ -97,29 +98,32 @@ if (!usernameInput.value) {
 
 // --- State ---
 const state = {
-  records: [],   // { id, n, u, o, l, e, s, lowerN, lowerU, lowerO, lowerL, lowerE, first }
+  records: [],   // { id, cipher, n, u, o, l, e, p, lowerN, lowerU, lowerO, lowerL, lowerE, first }
   query: "",
   letter: null,  // active quick-search letter filter
   password: "",  // vault encryption key (kept in memory while unlocked)
-  vaultSalt: null, // Uint8Array — per-vault salt for credential keys
-  kdf: null,     // vault KDF params (from decryptDatabase) for credential keys
-  key: null,     // cached credential CryptoKey (derived lazily)
+  headerB64: "", // vault header (KDF params + salt), base64url
+  salt: null,    // Uint8Array — per-vault salt for record keys
+  kdf: null,     // vault KDF params, for record keys
+  key: null,     // cached record CryptoKey (derived lazily)
   selected: null, // record id currently shown in the details view
   editing: false, // details screen is showing the edit form
   editingId: null, // id of the record being edited (null = creating a new one)
-  nextId: 0,      // next client-side record id
 };
+
+// One change (a record + its header + a note) must fit in a single Telegram
+// message, so a record that would not is refused rather than silently lost.
+const MAX_PAYLOAD = 4000;
 
 // --- Local cache of the last inserted database ----------------------------
 // The bot stamps every Mini App link it hands out with the vault's revision
-// (?v=<version>&t=<updatedAtMillis>&c=<checksum>). On open we compare that
-// stamp with the encrypted blob we cached in localStorage to decide whether
-// the user still holds the latest database or must fetch it again.
+// (?v=<version>&t=<updatedAtMillis>&c=<revision>). On open we compare that
+// stamp with the container we cached in localStorage to decide whether the user
+// still holds the latest database or must fetch it again.
 //
-// The comparison key is the vault checksum (the 8 hex chars already embedded
-// in the "VLT2:...<checksum>" transport string) because it is content-based
-// and survives bot restarts, unlike a wall-clock timestamp. The timestamp is
-// still stored and shown to the user.
+// The comparison key is the container's 8-hex revision (it is content-based and
+// survives bot restarts, unlike a wall-clock timestamp); the timestamp is still
+// stored and shown to the user.
 const CACHE_KEYS = {
   blob: "botwheel-vault-blob",
   c: "botwheel-vault-checksum",
@@ -212,13 +216,13 @@ function clearPending() {
 }
 
 // sendData() is only delivered when the Mini App was opened from the keyboard
-// button. So a vault saved from an inline/menu launch is queued here and pushed
-// automatically the next time the app is opened that way.
+// button. So a change saved from an inline/menu launch is queued here and
+// pushed automatically the next time the app is opened that way.
 function flushPending() {
   const pending = readPending();
   if (!pending || !canSendData()) return false;
   try {
-    tg.sendData("/update " + pending);
+    tg.sendData(pending);
     clearPending();
     return true;
   } catch (e) {
@@ -275,6 +279,7 @@ function renderCacheBar() {
     cacheText.innerHTML = "Cached " + escapeHtml(fmtStamp(cached.t || cached.savedAt)) +
       ', <span class="cache-unverified">outdated</span>';
     pasteField.hidden = false;
+    pasteArea.setAttribute("placeholder", "Paste the vault file content (VLT3:...)");
   } else {
     preferredBlob = cached.blob;
     cacheText.innerHTML = 'Cached, <span class="cache-unverified">unverified</span>';
@@ -331,39 +336,26 @@ function matchScore(rec, q) {
   return Infinity;
 }
 
-// --- Unlock / lock ---
-// v3 record: { n, u, o, l, e, s } — n mandatory, s = encrypted password, l/e optional plaintext.
-// v2 record: { n, u, o, s } — s = encrypted "username\0password".
-// v1 record: { r, t, s } — migrate r -> name, t -> notes.
-function normalizeEntry(e) {
-  if (e.n !== undefined) {
-    return { n: e.n || "", u: e.u || "", o: e.o || "", l: e.l || "", e: e.e || "", s: e.s || "" };
-  }
-  return { n: e.r || "", u: "", o: e.t || "", l: "", e: "", s: e.s || "" };
-}
-
-function buildIndex(entries) {
-  const records = (entries || []).map((e, i) => {
-    const rec = normalizeEntry(e);
-    return {
-      id: i,
-      n: rec.n,
-      u: rec.u,
-      o: rec.o,
-      l: rec.l,
-      e: rec.e,
-      s: rec.s,
-      lowerN: rec.n.toLowerCase(),
-      lowerU: rec.u.toLowerCase(),
-      lowerO: rec.o.toLowerCase(),
-      lowerL: rec.l.toLowerCase(),
-      lowerE: rec.e.toLowerCase(),
-      first: firstLetter(rec.n),
+// --- Unlock ---
+// A record is { id, cipher, n, u, o, l, e, p }: `id` is the content hash the bot
+// stores the row under, `cipher` is the encrypted r1. field and the rest is the
+// decrypted plaintext (n is mandatory).
+function buildIndex(records) {
+  state.records = (records || []).map((r) => {
+    const rec = {
+      id: r.id,
+      cipher: r.cipher,
+      n: r.n || "",
+      u: r.u || "",
+      o: r.o || "",
+      l: r.l || "",
+      e: r.e || "",
+      p: r.p || "",
     };
+    recomputeRec(rec);
+    return rec;
   });
-  records.sort((a, b) => a.lowerN.localeCompare(b.lowerN));
-  state.nextId = records.length;
-  state.records = records;
+  state.records.sort((a, b) => a.lowerN.localeCompare(b.lowerN));
 }
 
 // Keep the denormalised search fields in sync after an edit.
@@ -376,11 +368,9 @@ function recomputeRec(rec) {
   rec.first = firstLetter(rec.n);
 }
 
-// Plain database rows (schema v3) ready to be re-encrypted.
-function entriesFromState() {
-  return state.records.map((rec) => ({
-    n: rec.n, u: rec.u, o: rec.o, l: rec.l, e: rec.e, s: rec.s,
-  }));
+// Plain fields of a record - the canonical form that is hashed and encrypted.
+function plainRecord(rec) {
+  return { n: rec.n, u: rec.u, o: rec.o, l: rec.l, e: rec.e, p: rec.p };
 }
 
 function updateVaultMeta() {
@@ -388,8 +378,8 @@ function updateVaultMeta() {
   vaultMetaEl.textContent = count + " record" + (count === 1 ? "" : "s");
 }
 
-function enterMainScreen(entries) {
-  buildIndex(entries);
+function enterMainScreen(records) {
+  buildIndex(records);
   state.query = "";
   state.letter = null;
   searchInput.value = "";
@@ -531,18 +521,18 @@ let passwordRevealed = false;
 
 async function getCredentialKey() {
   if (!state.key) {
-    state.key = await window.CryptoCore.deriveKey(state.password, state.vaultSalt, state.kdf);
+    state.key = await window.CryptoCore.deriveKey(state.password, state.salt, state.kdf);
   }
   return state.key;
 }
 
-async function openRecord(rec) {
-  const id = rec.id;
-  state.selected = id;
+function openRecord(rec) {
+  state.selected = rec.id;
   state.editing = false;
   state.editingId = null;
   detailsTitle.textContent = "Record details";
   detailsEditBtn.hidden = false;
+  detailsDeleteBtn.hidden = false;
   detailsBody.hidden = false;
   editForm.hidden = true;
   saveScreen.hidden = true;
@@ -561,36 +551,18 @@ async function openRecord(rec) {
   detailsLogin.textContent = rec.l || "—";
   detailsEmail.textContent = rec.e || "—";
 
-  detailsPassword.textContent = "••••••••";
-  detailsData = { login: rec.l || "", email: rec.e || "", password: "" };
+  detailsData = { login: rec.l || "", email: rec.e || "", password: rec.p || "" };
   passwordRevealed = false;
   revealPasswordBtn.textContent = "Show";
+  detailsPassword.textContent = maskPassword(detailsData.password);
   detailsStatus.hidden = true;
 
   mainScreen.hidden = true;
   detailsScreen.hidden = false;
+}
 
-  try {
-    const key = await getCredentialKey();
-    const secret = await window.CryptoCore.decryptWithKey(key, rec.s);
-    if (state.selected !== id) return; // another record was opened meanwhile
-    const sep = secret.indexOf("\u0000");
-    if (sep !== -1) {
-      // legacy v1/v2: "username\0password"
-      detailsData.login = secret.slice(0, sep);
-      detailsData.password = secret.slice(sep + 1);
-      detailsLogin.textContent = detailsData.login || "—";
-    } else {
-      detailsData.password = secret;
-    }
-    detailsPassword.textContent = passwordRevealed
-      ? detailsData.password
-      : "•".repeat(Math.max(8, detailsData.password.length));
-  } catch (err) {
-    if (state.selected !== id) return;
-    detailsData = { login: "", email: "", password: "" };
-    detailsPassword.textContent = "—";
-  }
+function maskPassword(secret) {
+  return secret ? "•".repeat(Math.max(8, secret.length)) : "—";
 }
 
 function closeDetails() {
@@ -601,6 +573,7 @@ function closeDetails() {
   state.editingId = null;
   editForm.hidden = true;
   detailsBody.hidden = false;
+  detailsDeleteBtn.hidden = false;
   saveScreen.hidden = true;
   passwordRevealed = false;
   detailsData = { login: "", email: "", password: "" };
@@ -630,6 +603,7 @@ async function openEditor(rec) {
 
   detailsTitle.textContent = rec ? "Edit record" : "New record";
   detailsEditBtn.hidden = true;
+  detailsDeleteBtn.hidden = true;
   detailsBody.hidden = true;
   editForm.hidden = false;
   saveScreen.hidden = true;
@@ -640,25 +614,13 @@ async function openEditor(rec) {
   editEmail.value = rec ? rec.e : "";
   editUrl.value = rec ? rec.u : "";
   editNotes.value = rec ? rec.o : "";
-  editPassword.value = "";
+  editPassword.value = rec ? rec.p : "";
   editPassword.type = "password";
   editRevealBtn.textContent = "Show";
 
   mainScreen.hidden = true;
   detailsScreen.hidden = false;
   editName.focus();
-
-  if (rec) {
-    // Show the current password so it can be edited (decrypt with the cached key).
-    try {
-      const key = await getCredentialKey();
-      const secret = await window.CryptoCore.decryptWithKey(key, rec.s);
-      const sep = secret.indexOf("\u0000");
-      editPassword.value = sep === -1 ? secret : secret.slice(sep + 1);
-    } catch (err) {
-      setEditError("Could not decrypt the current password — enter it again.");
-    }
-  }
 }
 
 function cancelEditor() {
@@ -668,6 +630,7 @@ function cancelEditor() {
   editForm.hidden = true;
   detailsBody.hidden = false;
   detailsEditBtn.hidden = false;
+  detailsDeleteBtn.hidden = false;
   detailsTitle.textContent = "Record details";
   setEditError("");
   if (wasNew) closeDetails();
@@ -686,51 +649,121 @@ async function saveEditor(e) {
   setEditError("");
   try {
     const key = await getCredentialKey();
-    const s = await window.CryptoCore.encryptWithKey(key, password);
+    const rec = plainRecord({
+      n: n,
+      u: editUrl.value.trim(),
+      o: editNotes.value,
+      l: editLogin.value.trim(),
+      e: editEmail.value.trim(),
+      p: password,
+    });
 
-    let rec = state.editingId != null
+    // The id is the hash of the canonical record: an edit is a delete of the old
+    // id plus an add of the new one, both in this single message.
+    const newId = await window.CryptoCore.recordId(rec);
+    const cipher = await window.CryptoCore.encryptRecord(key, rec);
+
+    // "Add" that matches an existing record's content is really an update: the
+    // two collapse into the same id (and the bot stores one row per id).
+    const existing = state.records.find((r) => r.id === newId);
+    const previous = state.editingId != null
       ? state.records.find((r) => r.id === state.editingId)
-      : null;
-    const isNew = !rec;
-    if (!rec) {
-      rec = { id: state.nextId++ };
-      state.records.push(rec);
+      : (existing || null);
+    const ops = [];
+    if (previous && previous.id !== newId) ops.push({ del: true, id: previous.id });
+    ops.push({ id: newId, cipher: cipher });
+
+    const note = (previous ? "Updated record: " : "Added record: ") + n;
+    const payload = window.CryptoCore.buildOpPayload(state.headerB64, ops, note);
+    if (payload.length > MAX_PAYLOAD) {
+      setEditError("This record is too large to send in one message — shorten the notes.");
+      return;
     }
-    rec.n = n;
-    rec.u = editUrl.value.trim();
-    rec.o = editNotes.value;
-    rec.l = editLogin.value.trim();
-    rec.e = editEmail.value.trim();
-    rec.s = s;
-    recomputeRec(rec);
 
-    // Re-encrypt the whole vault with the SAME salt + KDF so existing records
-    // keep decrypting with the already-derived key.
-    const blob = await window.CryptoCore.encryptDatabase(
-      entriesFromState(), state.password, { salt: state.vaultSalt, kdf: state.kdf });
+    if (previous) {
+      previous.id = newId;
+      previous.cipher = cipher;
+      previous.n = rec.n;
+      previous.u = rec.u;
+      previous.o = rec.o;
+      previous.l = rec.l;
+      previous.e = rec.e;
+      previous.p = rec.p;
+      recomputeRec(previous);
+    } else {
+      const created = Object.assign({ id: newId, cipher: cipher }, rec);
+      recomputeRec(created);
+      state.records.push(created);
+    }
 
-    // The local cache becomes the revision we hand back to the bot.
-    serverRevision = { c: checksumOf(blob), v: "", t: "" };
-    writeCache(blob);
-    preferredBlob = blob;
-
-    state.records.sort((a, b) => a.lowerN.localeCompare(b.lowerN));
-    state.editing = false;
-    state.editingId = null;
-    editForm.hidden = true;
-    detailsBody.hidden = false;
-    detailsEditBtn.hidden = false;
-    detailsTitle.textContent = "Record details";
-
-    updateVaultMeta();
-    render();
-    await openRecord(rec);
-    showSavePanel(blob, (isNew ? "Added new record: " : "Updated record: ") + n);
+    const target = previous || state.records[state.records.length - 1];
+    endEditing();
+    await pushChange(ops, payload, target);
   } catch (err) {
     setEditError("Could not save: " + (err && err.message ? err.message : err));
   } finally {
     setEditBusy(false);
   }
+}
+
+/** Leave the edit form and show the record's details again. */
+function endEditing() {
+  state.editing = false;
+  state.editingId = null;
+  editForm.hidden = true;
+  detailsBody.hidden = false;
+  detailsEditBtn.hidden = false;
+  detailsDeleteBtn.hidden = false;
+  detailsTitle.textContent = "Record details";
+}
+
+function deleteSelected() {
+  const rec = state.records.find((r) => r.id === state.selected);
+  if (!rec) return;
+  confirmDialog("Delete \u201C" + rec.n + "\u201D?").then(async (ok) => {
+    if (!ok) return;
+    state.records = state.records.filter((r) => r.id !== rec.id);
+    const note = "Deleted record: " + rec.n;
+    const ops = [{ del: true, id: rec.id }];
+    const payload = window.CryptoCore.buildOpPayload(state.headerB64, ops, note);
+    closeDetails();
+    await pushChange(ops, payload, null);
+  });
+}
+
+/** Ask the user to confirm; prefer Telegram's native dialog when available. */
+function confirmDialog(message) {
+  return new Promise((resolve) => {
+    if (tg && typeof tg.showConfirm === "function") {
+      try {
+        tg.showConfirm(message, (ok) => resolve(!!ok));
+        return;
+      } catch (e) {
+        // fall through to window.confirm
+      }
+    }
+    resolve(window.confirm(message));
+  });
+}
+
+/**
+ * Rebuild the container from the in-memory records, cache it as the local
+ * revision, then hand the small update payload to the bot. `target` (optional)
+ * is the record to re-open in the details view afterwards.
+ */
+async function pushChange(ops, payload, target) {
+  const stored = state.records.map((r) => ({ i: r.id, d: r.cipher }));
+  const container = await window.CryptoCore.buildVault(state.headerB64, stored);
+
+  serverRevision = { c: window.CryptoCore.checksumOf(container), v: "", t: "" };
+  writeCache(container);
+  preferredBlob = container;
+
+  state.records.sort((a, b) => a.lowerN.localeCompare(b.lowerN));
+  updateVaultMeta();
+  render();
+  if (target) openRecord(target);
+  showSavePanel(payload);
 }
 
 // Telegram.WebApp.sendData() is only delivered when the Mini App was launched
@@ -764,8 +797,8 @@ function renderSavePanel(cmd) {
   saveCopy.classList.toggle("button-secondary", canAuto);
   saveCopy.textContent = "Copy command";
   saveHint.textContent = canAuto
-    ? "Tap \u201CSend to bot\u201D to store the new version, or copy the command and paste it into the chat."
-    : "Saved in this browser \u2014 not stored on the bot yet. Telegram only delivers the vault when the Mini App is opened from the keyboard button in the chat, so tap \u201CCopy command\u201D and paste it there, or reopen the vault from that keyboard button to send it automatically.";
+    ? "Tap \u201CSend to bot\u201D to store this change, or copy it and paste it into the chat."
+    : "Saved in this browser \u2014 not stored on the bot yet. Telegram only delivers the change when the Mini App is opened from the keyboard button in the chat, so tap \u201CCopy command\u201D and paste it there, or reopen the vault from that keyboard button to send it automatically.";
   saveScreen.hidden = false;
   copyText(cmd).then(() => {
     saveCopy.textContent = "Copied!";
@@ -773,26 +806,20 @@ function renderSavePanel(cmd) {
   }).catch(() => {});
 }
 
-// The blob carries no whitespace, so the optional change description rides
-// after it on a new line ("note: …"); the bot appends it to its confirmation.
-function updatePayload(blob, note) {
-  return blob + (note ? "\nnote: " + note : "");
-}
-
-function showSavePanel(blob, note) {
-  const payload = updatePayload(blob, note);
-  const cmd = "/update " + payload;
-  if (canSendData() && sendToBot(cmd)) {
+// The bot's reply carries the change note, and the payload is exactly what the
+// bot expects - the optional "note:" line is already part of it.
+function showSavePanel(payload) {
+  if (canSendData() && sendToBot(payload)) {
     clearPending();
     // sendData closes the Mini App. If the client ignored it, fall back to the
     // manual panel a moment later.
     setTimeout(() => {
-      if (saveScreen.hidden) renderSavePanel(cmd);
+      if (saveScreen.hidden) renderSavePanel(payload);
     }, 1000);
     return;
   }
   setPending(payload);
-  renderSavePanel(cmd);
+  renderSavePanel(payload);
 }
 
 async function copyText(text) {
@@ -931,16 +958,17 @@ async function load() {
 
     showResult("Decrypting…");
     let lastError = null;
-    for (const blobText of candidates) {
+    for (const containerText of candidates) {
       try {
-        const vault = await window.CryptoCore.decryptDatabase(blobText, password);
+        const vault = await window.CryptoCore.openVault(containerText, password);
         result.hidden = true;
-        writeCache(blobText);
+        writeCache(containerText);
         state.password = password;
-        state.vaultSalt = vault.salt;
-        state.kdf = vault.kdf || null;
+        state.headerB64 = vault.headerB64;
+        state.salt = vault.salt;
+        state.kdf = vault.kdf;
         state.key = null;
-        enterMainScreen(vault.entries);
+        enterMainScreen(vault.records);
         return;
       } catch (err) {
         lastError = err;
@@ -988,6 +1016,8 @@ detailsEditBtn.addEventListener("click", () => {
   if (rec) openEditor(rec);
 });
 
+detailsDeleteBtn.addEventListener("click", deleteSelected);
+
 addBtn.addEventListener("click", () => openEditor(null));
 
 editForm.addEventListener("submit", saveEditor);
@@ -1034,8 +1064,8 @@ revealPasswordBtn.addEventListener("click", () => {
   passwordRevealed = !passwordRevealed;
   revealPasswordBtn.textContent = passwordRevealed ? "Hide" : "Show";
   detailsPassword.textContent = passwordRevealed
-    ? detailsData.password
-    : "•".repeat(Math.max(8, detailsData.password.length));
+    ? (detailsData.password || "—")
+    : maskPassword(detailsData.password);
 });
 
 detailsLogin.addEventListener("click", async () => {

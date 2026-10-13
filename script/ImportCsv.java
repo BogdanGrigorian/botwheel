@@ -1,6 +1,6 @@
 /*
  * ImportCsv - turn an Excel-exported credentials CSV into a ready-to-use vault
- * blob (VLT2) for the Botwheel Mini App / bot database. Normally launched by
+ * container (VLT3) for the Botwheel Mini App / bot database. Normally launched by
  * import-csv.cmd, but it can also be run by hand:
  *
  *     javac -encoding UTF-8 -cp java\target\classes -d %TEMP%\import-csv-classes ImportCsv.java
@@ -41,17 +41,19 @@
  *
  * ENCRYPTION (mirrors the Mini App, so the result opens there with the same
  * passphrase):
- *     each password -> "s1.<base64url(iv || ct || tag)>"      with the vault key
- *     whole vault   -> JSON {version:3,entries:[...]} -> gzip -> AES-256-GCM
- *                   -> "VLT2:<base64url(header||salt||iv||ct||tag)>.<8-hex>"
+ *     each record -> "r1.<base64url(iv || ct || tag)>"        with the vault key
+ *                    plaintext = canonical JSON {n,u,o,l,e,p}
+ *     container   -> header + gzip([{"i":id,"d":cipher},...])
+ *                 -> "VLT3:<base64url(header||gzip(records))>.<8-hex-revision>"
  * The key is derived from the passphrase file (raw text, default
  * passphrase.key) with Argon2id 64 MiB / 3 iterations / 1 lane and a 16-byte
- * salt. The same salt and key are reused for the password fields, so the record
- * keys and the vault key always match.
+ * salt, all described by the container's 29-byte header (KDF params + salt).
+ * Appending reuses the existing container's header, so records already in it
+ * keep decrypting with the very same key.
  *
- * NOT DONE HERE: the bot's server-side at-rest wrapper ("SRV1.<...>"). What this
- * tool writes is exactly the string the Mini App uploads, so whoever puts it
- * into the database does that wrapping (VaultStore.put).
+ * The container is exactly what the bot sends back as a .txt file, so the bot
+ * can ingest it (split it into rows, no crypto needed) or the Mini App can open
+ * it. No at-rest (SRV1.) wrapper is added here - VaultStore does that.
  *
  * Exit codes: 0 ok, 2 usage/input problem, 3 encryption or file problem.
  */
@@ -206,15 +208,15 @@ public final class ImportCsv {
 
         /* An existing vault is never replaced behind your back: it is opened with
          * the passphrase, its records are kept and the CSV rows are appended to
-         * them. Its salt and KDF are reused, so every password field already in it
+         * them. Its header (KDF + salt) is reused, so every record already in it
          * keeps decrypting with the very same key. */
-        List<CryptoCore.Entry> entries = new ArrayList<>();
-        List<String> passwords = new ArrayList<>();   // plaintext, for the round-trip check only
-        Set<String> known = new HashSet<>();
+        List<CryptoCore.StoredRecord> stored = new ArrayList<>();
+        List<Pending> pending = new ArrayList<>();
+        Set<String> known = new HashSet<>();      // identity (title+login+e-mail), for --dedupe
+        Set<String> knownIds = new HashSet<>();   // content ids already in the vault
         int existingCount = 0;
         boolean replacing = false;
-        byte[] salt = requestedSalt;
-        CryptoCore.KdfParams kdf = CryptoCore.KdfParams.DEFAULT_ARGON2;
+        String headerB64 = null;
 
         if (!freshRequested && Files.isRegularFile(vaultOut)) {
             String existing;
@@ -225,9 +227,11 @@ public final class ImportCsv {
                 return;
             }
             if (!existing.isEmpty()) {
-                CryptoCore.Vault opened;
+                CryptoCore.VaultStructure opened;
+                List<CryptoCore.Record> openedRecords;
                 try {
-                    opened = CryptoCore.decryptDatabase(existing, passphrase);
+                    opened = CryptoCore.parseVaultStructure(existing);
+                    openedRecords = CryptoCore.openRecords(opened, passphrase);
                 } catch (Exception e) {
                     fail("cannot open the existing vault " + vaultOut + ": " + e.getMessage()
                             + System.lineSeparator()
@@ -235,34 +239,31 @@ public final class ImportCsv {
                             + " start over from the CSV alone.", 3);
                     return;
                 }
-                salt = opened.salt;
-                kdf = opened.kdf;
-                existingCount = opened.entries.size();
+                headerB64 = opened.headerB64;
+                existingCount = opened.records.size();
                 replacing = true;
                 if (requestedSalt != null
                         && !CryptoCore.toBase64url(requestedSalt)
-                                .equals(CryptoCore.toBase64url(salt))) {
+                                .equals(CryptoCore.toBase64url(CryptoCore.headerSalt(headerB64)))) {
                     fail("--salt does not match the salt of the existing vault"
                             + System.lineSeparator()
                             + "       Appending keeps the existing key - drop --salt, or use --fresh.", 2);
                 }
-                try {
-                    for (CryptoCore.DecryptedEntry record : CryptoCore.decryptEntries(
-                            opened.entries, passphrase, salt, kdf)) {
-                        passwords.add(record.password);
-                        known.add(identity(record.n, record.l, record.e));
-                    }
-                } catch (Exception e) {
-                    fail("the records of " + vaultOut + " do not decrypt: " + e.getMessage(), 3);
-                    return;
+                for (CryptoCore.Record record : openedRecords) {
+                    known.add(identity(record.n, record.l, record.e));
                 }
-                entries.addAll(opened.entries);
+                for (CryptoCore.StoredRecord record : opened.records) {
+                    knownIds.add(record.id);
+                }
+                stored.addAll(opened.records);
                 System.out.println("Existing   : " + existingCount + " records opened from "
                         + vaultOut + " - appending to them");
             }
         }
-        if (salt == null) {
-            salt = CryptoCore.randomBytes(CryptoCore.SALT_BYTES);
+        if (headerB64 == null) {
+            headerB64 = requestedSalt != null
+                    ? CryptoCore.encodeVaultHeader(CryptoCore.KdfParams.DEFAULT_ARGON2, requestedSalt)
+                    : CryptoCore.newVaultHeader();
         }
 
         List<Row> rows;
@@ -310,12 +311,28 @@ public final class ImportCsv {
                 continue;
             }
             Mapped mapped = browserLayout ? mapBrowser(row) : mapLegacy(row);
-            if (dedupe && !known.add(identity(mapped.entry.n, mapped.entry.l, mapped.entry.e))) {
+            CryptoCore.Record record = mapped.record;
+            String json = CryptoCore.canonicalRecord(record);
+            String id;
+            try {
+                id = CryptoCore.recordId(json);
+            } catch (Exception e) {
+                invalid.add(row);
+                reasons.merge("record id failed: " + e.getMessage(), 1, Integer::sum);
+                continue;
+            }
+            // A record whose content is already present hashes to the same id, so
+            // re-importing the same CSV never duplicates anything.
+            if (knownIds.contains(id)) {
                 duplicates++;
                 continue;
             }
-            entries.add(mapped.entry);
-            passwords.add(mapped.password);
+            if (dedupe && !known.add(identity(record.n, record.l, record.e))) {
+                duplicates++;
+                continue;
+            }
+            knownIds.add(id);
+            pending.add(new Pending(id, json));
             added++;
             if (mapped.urlFromTitle) {
                 urlFromTitle++;
@@ -342,9 +359,17 @@ public final class ImportCsv {
             return;
         }
 
-        String blob;
+        String container;
         try {
-            blob = buildBlob(entries, passwords, passphrase, salt, kdf);
+            if (!pending.isEmpty()) {
+                SecretKeySpec key = CryptoCore.deriveKey(passphrase,
+                        CryptoCore.headerSalt(headerB64), CryptoCore.headerKdf(headerB64));
+                for (Pending p : pending) {
+                    stored.add(new CryptoCore.StoredRecord(
+                            p.id, CryptoCore.encryptRecord(key, p.json)));
+                }
+            }
+            container = buildVault(headerB64, stored, passphrase);
         } catch (Exception e) {
             fail("encryption failed: " + e.getMessage(), 3);
             return;
@@ -360,7 +385,7 @@ public final class ImportCsv {
                 backup = vaultOut.resolveSibling(vaultOut.getFileName() + ".bak");
                 Files.copy(vaultOut, backup, StandardCopyOption.REPLACE_EXISTING);
             }
-            Files.write(vaultOut, blob.getBytes(StandardCharsets.UTF_8));
+            Files.write(vaultOut, container.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             fail("cannot write " + vaultOut + ": " + e.getMessage(), 3);
             return;
@@ -370,54 +395,61 @@ public final class ImportCsv {
         report(data.size(), added, blank, urlFromTitle, usernameEmails,
                 browserLayout, duplicates, existingCount, invalid, invalidFile, reasons);
         System.out.println();
-        System.out.println("KDF        : " + kdfLabel(kdf));
-        System.out.println("Salt       : " + CryptoCore.toBase64url(salt)
-                + (replacing ? "   (kept from the existing vault)" : "   (pass --salt to reuse it)"));
-        System.out.println("Blob       : " + blob.length() + " chars, checksum " + checksumOf(blob));
-        System.out.println("Round-trip : OK - all " + entries.size()
-                + " passwords decrypted back with the passphrase");
+        System.out.println("KDF        : " + kdfLabel(CryptoCore.headerKdf(headerB64)));
+        System.out.println("Header     : " + headerB64
+                + (replacing ? "   (kept from the existing vault)" : "   (pass --salt to reuse the salt)"));
+        System.out.println("Container  : " + container.length() + " chars, revision " + revisionOf(container));
+        System.out.println("Round-trip : OK - all " + stored.size()
+                + " records decrypted back with the passphrase");
         if (backup != null) {
             System.out.println("Backup     : " + backup + "   (the vault as it was before)");
         }
         System.out.println("Wrote      : " + vaultOut);
         System.out.println();
-        System.out.println("Next: insert that blob (nothing else) into the vault database -");
-        System.out.println("this tool does not touch the DB and adds no at-rest (SRV1.) wrapper.");
+        System.out.println("Next: the bot ingests this file on the first /start (telegram.seed.file),");
+        System.out.println("or paste its content into the Mini App. This tool adds no at-rest wrapper.");
         System.exit(0);
     }
 
     /* ---------------------------------------------------------- encryption -- */
 
-    private static String buildBlob(List<CryptoCore.Entry> entries, List<String> passwords,
-                                    String passphrase, byte[] salt, CryptoCore.KdfParams kdf)
-            throws Exception {
-        SecretKeySpec key = CryptoCore.deriveKey(passphrase, salt, kdf);
-        for (int i = 0; i < entries.size(); i++) {
-            CryptoCore.Entry entry = entries.get(i);
-            if (entry.s == null) {   // records read back from the vault are already sealed
-                entry.s = CryptoCore.encryptWithKey(key, passwords.get(i));
-            }
+    /** One new record waiting to be sealed (id + its canonical JSON). */
+    private static final class Pending {
+        final String id;
+        final String json;
+
+        Pending(String id, String json) {
+            this.id = id;
+            this.json = json;
         }
-        String blob = CryptoCore.encryptDatabase(entries, passphrase, salt, kdf);
-        verify(blob, passphrase, passwords);
-        return blob;
     }
 
-    /* Decrypt what we just built and compare every password with the source, so a
-     * silent encryption mistake can never reach the database. */
-    private static void verify(String blob, String passphrase, List<String> expected) throws Exception {
-        CryptoCore.Vault vault = CryptoCore.decryptDatabase(blob, passphrase);
-        if (vault.entries.size() != expected.size()) {
-            throw new IllegalStateException("vault reopened with " + vault.entries.size()
+    private static String buildVault(String headerB64, List<CryptoCore.StoredRecord> stored,
+                                     String passphrase) throws Exception {
+        String container = CryptoCore.buildVault(headerB64, stored);
+        verify(container, passphrase, stored);
+        return container;
+    }
+
+    /* Decrypt what we just built and compare the ids with the source, so a silent
+     * encryption mistake can never reach the database. */
+    private static void verify(String container, String passphrase,
+                               List<CryptoCore.StoredRecord> expected) throws Exception {
+        CryptoCore.VaultStructure structure = CryptoCore.parseVaultStructure(container);
+        if (structure.records.size() != expected.size()) {
+            throw new IllegalStateException("container reopened with " + structure.records.size()
                     + " records instead of " + expected.size());
         }
-        List<CryptoCore.DecryptedEntry> back =
-                CryptoCore.decryptEntries(vault.entries, passphrase, vault.salt, vault.kdf);
-        for (int i = 0; i < expected.size(); i++) {
-            if (!expected.get(i).equals(back.get(i).password)) {
-                throw new IllegalStateException("record " + (i + 1)
-                        + " (" + back.get(i).n + ") did not decrypt back");
-            }
+        Set<String> want = new HashSet<>();
+        for (CryptoCore.StoredRecord record : expected) {
+            want.add(record.id);
+        }
+        Set<String> got = new HashSet<>();
+        for (CryptoCore.Record record : CryptoCore.openRecords(structure, passphrase)) {
+            got.add(CryptoCore.recordId(CryptoCore.canonicalRecord(record)));
+        }
+        if (!want.equals(got)) {
+            throw new IllegalStateException("records did not decrypt back with the passphrase");
         }
     }
 
@@ -434,9 +466,10 @@ public final class ImportCsv {
         return (n + "\u0000" + l + "\u0000" + e).toLowerCase(Locale.ROOT);
     }
 
-    private static String checksumOf(String blob) {
-        int dot = blob.lastIndexOf('.');
-        return dot < 0 ? "" : blob.substring(dot + 1);
+    /** The 8-hex revision suffix of a container. */
+    private static String revisionOf(String container) {
+        int dot = container.lastIndexOf('.');
+        return dot < 0 ? "" : container.substring(dot + 1);
     }
 
     /* Raw passphrase text: UTF-8 (or CP1252), BOM stripped, trailing line
@@ -544,14 +577,12 @@ public final class ImportCsv {
 
     /* One CSV row mapped onto a vault record, plus what the mapping decided. */
     private static final class Mapped {
-        final CryptoCore.Entry entry;
-        final String password;
+        final CryptoCore.Record record;
         final boolean urlFromTitle;
         final boolean usernameIsEmail;
 
-        Mapped(CryptoCore.Entry entry, String password, boolean urlFromTitle, boolean usernameIsEmail) {
-            this.entry = entry;
-            this.password = password;
+        Mapped(CryptoCore.Record record, boolean urlFromTitle, boolean usernameIsEmail) {
+            this.record = record;
             this.urlFromTitle = urlFromTitle;
             this.usernameIsEmail = usernameIsEmail;
         }
@@ -569,9 +600,9 @@ public final class ImportCsv {
                 fromTitle = true;
             }
         }
-        CryptoCore.Entry entry = new CryptoCore.Entry(d2, link, value(row, C_NOTE),
-                value(row, C_USERNAME), value(row, C_EMAIL), null);
-        return new Mapped(entry, value(row, C_PASSWORD), fromTitle, false);
+        CryptoCore.Record record = new CryptoCore.Record(d2, link, value(row, C_NOTE),
+                value(row, C_USERNAME), value(row, C_EMAIL), value(row, C_PASSWORD));
+        return new Mapped(record, fromTitle, false);
     }
 
     /* Browser export: the single "username" column has to serve both the login
@@ -589,9 +620,9 @@ public final class ImportCsv {
         }
         String user = value(row, B_USERNAME);
         boolean isEmail = looksLikeEmail(user);
-        CryptoCore.Entry entry = new CryptoCore.Entry(name, link, value(row, B_NOTE),
-                isEmail ? "" : user, isEmail ? user : "", null);
-        return new Mapped(entry, value(row, B_PASSWORD), fromTitle, isEmail);
+        CryptoCore.Record record = new CryptoCore.Record(name, link, value(row, B_NOTE),
+                isEmail ? "" : user, isEmail ? user : "", value(row, B_PASSWORD));
+        return new Mapped(record, fromTitle, isEmail);
     }
 
     /* A username is treated as an address only when it really looks like one:
@@ -790,7 +821,7 @@ public final class ImportCsv {
         out.println();
         out.println("  <csv-file>             CSV exported from Excel / a browser password manager");
         out.println("                         (header row is skipped)");
-        out.println("  [vault-out]            vault blob to add the records to");
+        out.println("  [vault-out]            vault container to add the records to");
         out.println("                         (default: " + DEFAULT_VAULT_FILE + ")");
         out.println("                         when it already exists it is opened with the");
         out.println("                         passphrase and the CSV rows are APPENDED to its");
@@ -798,7 +829,7 @@ public final class ImportCsv {
         out.println("  [--fresh]              ignore an existing vault and start a new one");
         out.println("                         (overwrites it, still keeping <vault>.bak)");
         out.println("  [--dedupe]             skip rows whose title + login + e-mail are already");
-        out.println("                         in the vault");
+        out.println("                         in the vault (identical records always collapse)");
         out.println("  [--browser-vault]      read a browser export instead of the legacy layout:");
         out.println("                           name,url,username,password,note");
         out.println("                         'username' lands in the e-mail field when it looks");
@@ -809,8 +840,9 @@ public final class ImportCsv {
         out.println("  [--salt <base64url>]   reuse an existing vault salt when starting fresh");
         out.println();
         out.println("Legacy layout: Description 1,Description 2,Username,Password,Email,Note");
-        out.println("Passwords are encrypted (s1. fields) and the whole vault is encrypted");
-        out.println("(VLT2 block) with a key derived from the passphrase with Argon2id.");
+        out.println("Each record is encrypted on its own (r1. field) and the whole vault is");
+        out.println("written as a VLT3 container with a key derived from the passphrase with");
+        out.println("Argon2id. The container is what the bot sends back as vault.txt.");
         out.println("Invalid rows (no title / no password) go to <csv-file>-invalid.csv.");
     }
 }

@@ -13,30 +13,28 @@ import java.util.Set;
 /**
  * Telegram bot (long polling) that hosts the Botwheel Vault Mini App.
  *
- * The bot does NO client-side encryption/decryption: it only stores the vault
- * transport string per user and hands it back over chat when the user taps
- * "Refresh database" (or sends /refresh). The user then opens the Mini App
- * (menu button / inline button) to unlock it with their password. New versions
- * produced by the Mini App are stored when the user sends /update &lt;blob&gt;.
- * The stored blob may additionally be wrapped with server-side *at-rest*
+ * The bot does NO client-side encryption/decryption. It stores one opaque
+ * ciphertext per record plus the small vault header (KDF params + salt), and
+ * reassembles them into a single container that it sends as a .txt file when
+ * the user taps "Refresh database" (or sends /refresh). The Mini App applies a
+ * change with a small per-record payload (VUP1:…) — always well under the
+ * 4096-character message limit — which the bot applies to its rows. Everything
+ * the bot stores may additionally be wrapped with server-side *at-rest*
  * encryption ({@link AtRestCrypto}); that layer is transparent to the client.
  */
 public final class BotwheelBot {
 
-    private static final int MAX_MESSAGE_LENGTH = 4096;
-    private static final int MAX_NOTE_LENGTH = 120;
-
     private final BotConfig config;
     private final TelegramApi api;
     private final VaultStore store;
-    private final String seedBlob; // may be null
+    private final String seedContainer; // a VLT3 container string, or null
     private final Set<Long> menuResetChats = new HashSet<>();
 
-    private BotwheelBot(BotConfig config, TelegramApi api, VaultStore store, String seedBlob) {
+    private BotwheelBot(BotConfig config, TelegramApi api, VaultStore store, String seedContainer) {
         this.config = config;
         this.api = api;
         this.store = store;
-        this.seedBlob = seedBlob;
+        this.seedContainer = seedContainer;
     }
 
     public static void main(String[] args) throws Exception {
@@ -47,16 +45,16 @@ public final class BotwheelBot {
         String username = Json.str(Json.obj(me.get("result")).get("username"));
         System.out.println("Authorized as @" + username);
 
-        String seedBlob = loadSeed(config.seedFile);
-        if (seedBlob != null) {
-            System.out.println("Seed vault loaded (" + seedBlob.length() + " chars) from " + config.seedFile);
+        String seedContainer = loadSeed(config.seedFile);
+        if (seedContainer != null) {
+            System.out.println("Seed vault loaded from " + config.seedFile);
         }
 
         AtRestCrypto atRest = AtRestCrypto.resolve(config.dbKey, config.dbKeyFile, System.out);
 
         try (VaultStore store = new VaultStore(config.dbPath, atRest)) {
             System.out.println("Vault database: " + config.dbPath);
-            new BotwheelBot(config, api, store, seedBlob).run();
+            new BotwheelBot(config, api, store, seedContainer).run();
         }
     }
 
@@ -163,7 +161,7 @@ public final class BotwheelBot {
 
         // A message pushed by the Mini App via Telegram.WebApp.sendData() arrives
         // as a service message: "/refresh" ("hand me the latest vault") or a
-        // vault update to store like an /update command.
+        // small per-record update (VUP1:…) to apply.
         Object webAppData = message.get("web_app_data");
         if (webAppData != null) {
             String data = Json.str(Json.obj(webAppData).get("data"));
@@ -172,8 +170,10 @@ public final class BotwheelBot {
                 sendVault(userId, chatId);
             } else if (trimmed.startsWith("/start") || trimmed.startsWith("/help")) {
                 welcome(userId, chatId);
+            } else if (trimmed.startsWith(CryptoCore.OP_PREFIX)) {
+                applyUpdate(userId, chatId, trimmed);
             } else {
-                storeVaultUpdate(userId, chatId, data);
+                api.sendMessage(chatId, "Unrecognised Mini App command.", null);
             }
             return;
         }
@@ -188,10 +188,8 @@ public final class BotwheelBot {
             welcome(userId, chatId);
         } else if (text.startsWith("/refresh")) {
             sendVault(userId, chatId);
-        } else if (text.startsWith("/update")) {
-            storeVaultUpdate(userId, chatId, text.substring("/update".length()));
-        } else if (looksLikeVault(text)) {
-            storeVaultUpdate(userId, chatId, text);
+        } else if (text.startsWith(CryptoCore.OP_PREFIX) || text.startsWith("/update")) {
+            applyUpdate(userId, chatId, text);
         }
         // Anything else is ignored.
     }
@@ -199,13 +197,13 @@ public final class BotwheelBot {
     private void welcome(long userId, long chatId) throws Exception {
         maybeSeed(userId);
         String text = "\uD83D\uDD10 Botwheel Vault\n\n"
-                + "This bot stores your encrypted vault and hands it back to you over chat. "
-                + "Tap \u201CRefresh database\u201D to receive your vault, then open the Mini App to unlock it. "
-                + "When you create or edit records, the Mini App sends the new vault back here automatically.";
+                + "This bot stores your encrypted vault and hands it back to you on request. "
+                + "Tap \u201CRefresh database\u201D to receive it as a file \u2014 open the file, copy its "
+                + "whole content and paste it into the Mini App's database field to unlock it.";
         api.sendMessage(chatId, text, mainKeyboard());
         api.sendMessage(chatId,
                 "Use the \u201COpen Vault\u201D keyboard button below the message field to open, "
-                        + "edit and save the vault \u2014 changes are sent back to me automatically.",
+                        + "edit and save records \u2014 each change is sent back to me automatically.",
                 updateKeyboard(userId));
     }
 
@@ -240,144 +238,62 @@ public final class BotwheelBot {
 
     private void sendVault(long userId, long chatId) throws Exception {
         maybeSeed(userId);
-        VaultStore.Entry entry = store.get(userId);
-        if (entry == null || entry.blob == null || entry.blob.isEmpty()) {
+        VaultStore.Snapshot snap = store.snapshot(userId);
+        if (snap == null || snap.header.isEmpty()) {
             api.sendMessage(chatId,
                     "No vault stored yet. Create it in the Mini App and send it back here "
                             + "(open the vault with the keyboard button below).",
                     updateKeyboard(userId));
             return;
         }
-        String blob = entry.blob;
-        // A <pre> code block: tapping it copies the whole blob in one tap.
-        // Tested: wrapping it in <blockquote expandable> is accepted by the API
-        // but the client drops the quote and shows a plain code block, so
-        // "collapsed + copyable" can't be combined — one-click copy wins.
-        String text = "\uD83D\uDD10 Your encrypted vault (v" + entry.version + ") — tap to copy:\n\n"
-                + "<pre>" + blob + "</pre>";
-        if (text.length() <= MAX_MESSAGE_LENGTH) {
-            api.sendMessage(chatId, text, updateKeyboard(userId), "HTML");
-        } else {
-            api.sendMessage(chatId,
-                    "Your vault is too large for a single message \u2014 sending it as a file.",
-                    updateKeyboard(userId));
-            api.sendDocument(chatId, "vault-v" + entry.version + ".txt", blob);
-        }
-    }
-
-    private void maybeSeed(long userId) {
-        if (seedBlob != null) {
-            store.seedIfAbsent(userId, seedBlob);
-        }
-    }
-
-    /**
-     * Store a new vault version sent by the Mini App (as "/update &lt;blob&gt;"
-     * or a bare transport string) and bump the user's revision.
-     */
-    private void storeVaultUpdate(long userId, long chatId, String raw) throws Exception {
-        String blob = extractVaultBlob(raw);
-        if (blob == null) {
-            api.sendMessage(chatId,
-                    "Send the vault string produced by the Mini App, e.g.\n/update VLT2:\u2026", null);
-            return;
-        }
-        VaultStore.Entry current = store.get(userId);
-        if (current != null && VaultStore.checksumOf(blob).equals(current.checksum)) {
-            api.sendMessage(chatId,
-                    "Already stored as v" + current.version + " (" + current.checksum
-                            + ") \u2014 nothing to update.", null);
-            return;
-        }
-        VaultStore.Entry entry = store.put(userId, blob);
-        // The Mini App appends what it changed, so the confirmation can say so.
-        String note = extractVaultNote(raw, blob);
-        // Re-send the keyboard so its Mini App URL carries the new revision.
-        api.sendMessage(chatId,
-                "Vault updated to v" + entry.version + " (" + entry.checksum + "). "
-                        + "Tap \u201CRefresh database\u201D to receive it."
-                        + (note.isEmpty() ? "" : " " + note),
+        // The container is just the header + the opaque records, so the server
+        // can assemble it without ever seeing the password. It always goes out
+        // as a file: the database can outgrow a 4096-char message.
+        String container = CryptoCore.buildVault(snap.header, snap.records);
+        String caption = "\uD83D\uDD10 Your encrypted vault (v" + snap.version + ", "
+                + snap.size() + " record" + (snap.size() == 1 ? "" : "s") + ").\n"
+                + "Open the file, copy its whole content and paste it into the Mini App.";
+        api.sendDocument(chatId, "vault-v" + snap.version + ".txt", container, caption,
                 updateKeyboard(userId));
     }
 
-    /**
-     * Pull the Mini App's short change description out of the update payload.
-     * It rides after the blob on a new line, prefixed with "note:" (e.g.
-     * "note: added new record: GitHub"); anything else is ignored. Returns ""
-     * when there is no note.
-     */
-    private static String extractVaultNote(String raw, String blob) {
-        if (raw == null || blob == null) {
-            return "";
+    private void maybeSeed(long userId) {
+        if (seedContainer == null) {
+            return;
         }
-        int end = raw.indexOf(blob) + blob.length();
-        String rest = raw.substring(Math.min(end, raw.length())).trim();
-        if (!rest.regionMatches(true, 0, "note:", 0, 5)) {
-            return "";
+        try {
+            CryptoCore.VaultStructure structure = CryptoCore.parseVaultStructure(seedContainer);
+            store.seedIfAbsent(userId, structure.headerB64, structure.records);
+        } catch (Exception e) {
+            System.err.println("Could not seed the vault from " + config.seedFile + ": " + e.getMessage());
         }
-        // One short line only — it is appended to the confirmation message.
-        rest = rest.substring(5).replaceAll("\\s+", " ").trim();
-        if (rest.length() > MAX_NOTE_LENGTH) {
-            rest = rest.substring(0, MAX_NOTE_LENGTH).trim() + "\u2026";
-        }
-        return rest;
-    }
-
-    /** True if the message already carries a vault transport string. */
-    private static boolean looksLikeVault(String text) {
-        return text.startsWith("VLT2:") || text.startsWith("VLT1:");
     }
 
     /**
-     * Pull the transport string out of the argument, tolerating a leading
-     * "/update", surrounding whitespace and trailing text. Requires an 8-hex
-     * checksum suffix so obviously malformed input is rejected.
+     * Apply a small per-record payload sent by the Mini App (via sendData() or
+     * pasted into the chat) and bump the user's revision.
      */
-    private static String extractVaultBlob(String raw) {
-        if (raw == null) {
-            return null;
+    private void applyUpdate(long userId, long chatId, String raw) throws Exception {
+        UpdatePayload payload = UpdatePayload.parse(raw);
+        if (payload == null) {
+            api.sendMessage(chatId,
+                    "Could not read that update. Send the string the Mini App produced (\"VUP1:\u2026\").",
+                    null);
+            return;
         }
-        String s = raw.trim();
-        int at = looksLikeVault(s) ? 0 : s.indexOf("VLT2:");
-        if (at < 0) {
-            at = s.indexOf("VLT1:");
-        }
-        if (at < 0) {
-            return null;
-        }
-        s = s.substring(at);
-        for (int i = 0; i < s.length(); i++) {
-            if (Character.isWhitespace(s.charAt(i))) {
-                s = s.substring(0, i);
-                break;
-            }
-        }
-        int dot = s.lastIndexOf('.');
-        if (dot < 0 || s.length() - dot - 1 != 8 || !isHex(s.substring(dot + 1))) {
-            return null;
-        }
-        return s;
-    }
-
-    private static boolean isHex(String s) {
-        if (s.isEmpty()) {
-            return false;
-        }
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-            if (!hex) {
-                return false;
-            }
-        }
-        return true;
+        VaultStore.Snapshot snap = store.applyOps(userId, payload.headerB64, payload.ops);
+        // Re-send the keyboard so its Mini App URL carries the new revision.
+        api.sendMessage(chatId,
+                "Vault updated to v" + snap.version + " \u2014 " + snap.size() + " record"
+                        + (snap.size() == 1 ? "" : "s")
+                        + (payload.note.isEmpty() ? "" : "  \u00b7  " + payload.note),
+                updateKeyboard(userId));
     }
 
     private static List<Map<String, Object>> commandList() {
         return List.of(
                 command("start", "Show the welcome message"),
-                command("refresh", "Receive your encrypted vault"),
-                command("update", "Store a new vault version (from the Mini App)"));
+                command("refresh", "Receive your encrypted vault as a file"));
     }
 
     private static Map<String, Object> command(String name, String description) {
@@ -393,15 +309,21 @@ public final class BotwheelBot {
      * the copy it cached in localStorage to decide whether it is up to date.
      */
     private String miniAppUrl(long userId) {
-        VaultStore.Entry entry = store.get(userId);
-        if (entry == null) {
+        VaultStore.Snapshot snap = store.snapshot(userId);
+        if (snap == null) {
             return config.miniAppUrl;
+        }
+        String checksum;
+        try {
+            checksum = CryptoCore.revisionOf(snap.records);
+        } catch (Exception e) {
+            checksum = "";
         }
         String sep = config.miniAppUrl.contains("?") ? "&" : "?";
         return config.miniAppUrl + sep
-                + "v=" + entry.version
-                + "&t=" + entry.updatedAtMillis
-                + "&c=" + entry.checksum;
+                + "v=" + snap.version
+                + "&t=" + snap.updatedAtMillis
+                + "&c=" + checksum;
     }
 
     private boolean isAllowed(long userId) {

@@ -3,22 +3,23 @@
 A server-less credentials manager for Telegram. Two parts:
 
 - **Mini App** — the UI (static, GitHub Pages). All cryptography runs in the browser.
-- **Telegram bot** — long polling only; stores each user's encrypted vault and hands it back over chat.
+- **Telegram bot** — long polling only; stores each user's encrypted records and hands the whole vault back over chat.
 
 No backend, no database server — and the bot never sees your passphrase.
 
 ```mermaid
 flowchart LR
   U[User] -->|messages / taps| BOT["Telegram bot<br/>long polling — no inbound port"]
-  BOT -->|stores blob at rest| DB[("H2 DB<br/>./data")]
-  BOT -->|sends VLT2 blob over chat| CHAT["Chat message → clipboard"]
+  BOT -->|one row per record, at rest| DB[("H2 DB<br/>./data")]
+  BOT -->|sends the vault as a .txt| CHAT["File → copied content"]
   CHAT --> APP["Mini App<br/>GitHub Pages (static)"]
   APP -->|decrypts locally with passphrase| U
+  APP -->|VUP1: one-record update| BOT
 ```
 
-**What you can do:** search and view records; create and update records in the existing vault. Open the Mini App with the bot's keyboard button below the message field — it is the only launch that can push the new version back to the bot automatically (and even that falls back to a copied `/update` command).
+**What you can do:** search and view records; create, update and delete records. Open the Mini App with the bot's keyboard button below the message field — it is the only launch that can push a change back to the bot automatically (and even that falls back to a copied `VUP1:` payload). Each change only carries the one record that changed, so it always fits in a single message.
 
-**Encryption is client-side, in 3 layers:** record password (`s1.`), whole vault (`VLT2:` — Argon2id), and server at-rest (`SRV1.`).
+**Encryption is client-side:** every record is encrypted whole (`r1.…`, Argon2id-derived key) and the vault is a container of those opaque records (`VLT3:`); the server adds an at-rest layer (`SRV1.`) on top of everything it stores.
 
 ---
 
@@ -54,7 +55,7 @@ docker compose up -d
 | `TELEGRAM_DB_PATH` | – | H2 DB path (default `botwheel-db`; Docker `/data/botwheel`) |
 | `TELEGRAM_DB_KEY_FILE` | – | At-rest key file (default `/data/botwheel.key`; `off` disables) |
 | `TELEGRAM_ALLOWED_USER_IDS` | – | Comma/space list; empty = everyone |
-| `TELEGRAM_SEED_FILE` | – | Optional demo blob seeded on first `/start` |
+| `TELEGRAM_SEED_FILE` | – | Optional vault container seeded (split into rows) on first `/start` |
 
 **Ports:** none — long polling makes outbound calls only; do not publish a port.
 
@@ -65,14 +66,14 @@ docker compose up -d
 | Key | Owner | How to get it | Used for |
 |---|---|---|---|
 | **Passphrase** | user | Chosen in the Mini App (no generation) | Argon2id → AES key; opens the vault + record passwords. Never leaves the device. |
-| **At-rest key** | server | Auto-created on first run, **or** `openssl rand -base64 32` → `TELEGRAM_DB_KEY` | Wraps the blob in the DB (`SRV1.…`). |
+| **At-rest key** | server | Auto-created on first run, **or** `openssl rand -base64 32` → `TELEGRAM_DB_KEY` | Wraps every stored header/ciphertext in the DB (`SRV1.…`). |
 
-- **Back up the at-rest key** — losing it makes stored vaults unreadable.
+- **Back up the at-rest key** — losing it makes every stored record unreadable.
 - For real key/DB separation, keep `TELEGRAM_DB_KEY_FILE` off the `./data` volume.
 - The bot token is a credential, not a crypto key.
 
 ### 4. Smoke test
-1. Message the bot `/start` → an **Open Vault** keyboard button appears below the message field; tap **Refresh database** to receive the vault string — it arrives as a **code block, tap it to copy** in one tap.
-2. Open the Mini App **from the keyboard button** → enter the passphrase → records appear.
-3. Add or edit a record → the Mini App sends the new version to the bot automatically.
-4. Tap **Refresh database** again → the new version comes back.
+1. Import your records once: `script\import-csv.cmd <csv> vault.txt` writes the container, then point `TELEGRAM_SEED_FILE` at it. Message the bot `/start` → an **Open Vault** keyboard button appears below the message field; tap **Refresh database** to receive the vault as a **`.txt` file** — open it and copy its whole content.
+2. Open the Mini App **from the keyboard button** → enter the passphrase, paste the file content → records appear.
+3. Add, edit or delete a record → the Mini App sends just that change to the bot automatically.
+4. Tap **Refresh database** again → the updated vault comes back as a file.

@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 rem ===========================================================================
 rem  import-csv.cmd - turn an Excel-exported credentials CSV into an encrypted
-rem                   vault blob (VLT2) ready to insert into the vault database.
+rem                   vault container (VLT3) the bot can seed from.
 rem
 rem  Usage:  import-csv.cmd <csv-file> [vault-out] [--browser-vault]
 rem                         [--fresh] [--dedupe] [--passphrase <file>]
@@ -12,13 +12,13 @@ rem
 rem    csv-file      comma separated, Excel quoting, first row = header (skipped):
 rem                  legacy:  Description 1, Description 2, Username, Password, Email, Note
 rem                  browser: name, url, username, password, note   (--browser-vault)
-rem    vault-out     vault blob to add the records to
+rem    vault-out     vault container to add the records to
 rem                  (default: vault.txt next to this script). When it already exists
 rem                  the file is opened with the passphrase and the CSV rows are
-rem                  APPENDED to its records; that vault's salt and KDF are reused, so
-rem                  the passwords already inside it keep decrypting. The previous blob
-rem                  is kept as <vault>.bak. A vault that cannot be opened (wrong
-rem                  passphrase, damaged) aborts the run without writing anything.
+rem                  APPENDED to its records; that vault's header (KDF + salt) is
+rem                  reused, so the records already inside it keep decrypting. The
+rem                  previous file is kept as <vault>.bak. A vault that cannot be
+rem                  opened (wrong passphrase, damaged) aborts without writing.
 rem    --fresh       ignore an existing vault and build a new one (keeps <vault>.bak)
 rem    --dedupe      skip rows whose title + login + e-mail are already in the vault
 rem    --browser-vault
@@ -32,28 +32,32 @@ rem    --salt        reuse an existing vault salt (base64url) when starting fres
 rem
 rem  Mapping (legacy):  title <- Description 2
 rem                      url   <- Description 1 (plus a URL found in Description 2)
-rem                      login <- Username      (plaintext)
-rem                      email <- Email         (plaintext)
-rem                      password <- Password   (encrypted)
+rem                      login <- Username
+rem                      email <- Email
+rem                      password <- Password
 rem                      note  <- Note
 rem
 rem  Mapping (browser): title <- name
 rem                      url   <- url (plus a URL found in name)
 rem                      login / email <- username, sorted by shape
-rem                      password <- password  (encrypted)
+rem                      password <- password
 rem                      note  <- note
 rem
 rem  Required: the title and the password. Rows missing either are not imported -
 rem  they are written unchanged to <csv-file>-invalid.csv.
 rem
-rem  What it does: every password is encrypted on its own (s1.<...>) with the
-rem  vault key, then the whole JSON database is gzipped + AES-256-GCM encrypted
-rem  into "VLT2:<...>.<checksum>" - exactly what the Mini App produces. The key
-rem  is derived from the passphrase with Argon2id (64 MiB / 3 / 1).
+rem  What it does: every record is encrypted on its own (r1.<...>) with the vault
+rem  key, then all of them are gzipped into
+rem  "VLT3:<base64url(header||gzip(records))>.<8-hex-revision>" - exactly the
+rem  container the Mini App opens and the bot sends back as vault.txt. The key is
+rem  derived from the passphrase with Argon2id (64 MiB / 3 / 1).
 rem
 rem  What it does NOT do: it never touches the database and never applies the
-rem  bot's at-rest (SRV1.) wrapper - the blob it writes is already the final
-rem  string; whoever stores it does that wrapping (VaultStore.put).
+rem  bot's at-rest (SRV1.) wrapper - the text it writes is the container itself;
+rem  VaultStore wraps it when it stores the rows.
+rem
+rem  Next: point telegram.seed.file at this file and the bot ingests it (splitting
+rem  it into one row per record) the first time that user runs /start.
 rem
 rem  Needs a JDK (javac/java) plus the compiled crypto port in
 rem  java\target\classes and Bouncy Castle in the local Maven repo.
@@ -216,8 +220,8 @@ echo   csv-file          CSV exported from Excel or a browser password manager
 echo                     ^(header row skipped^):
 echo                       legacy:  Description 1,Description 2,Username,Password,Email,Note
 echo                       browser: name,url,username,password,note   ^(--browser-vault^)
-echo   vault-out         vault blob to add the records to (default: vault.txt)
-echo                     if it exists the rows are APPENDED to it and the old blob
+echo   vault-out         vault container to add the records to (default: vault.txt)
+echo                     if it exists the rows are APPENDED to it and the old file
 echo                     is kept as ^<vault^>.bak
 echo   --fresh           start a new vault, ignoring the existing one
 echo   --dedupe          skip rows that are already in the vault
@@ -227,8 +231,8 @@ echo   --passphrase      file with the vault passphrase as raw text
 echo                     (default: passphrase.key)
 echo   --salt            reuse an existing vault salt when starting fresh
 echo.
-echo Passwords are encrypted ^(s1.^) and the whole vault is encrypted ^(VLT2 block^)
-echo with a key derived from the passphrase with Argon2id.
+echo Each record is encrypted on its own ^(r1.^) and the vault is written as a
+echo VLT3 container with a key derived from the passphrase with Argon2id.
 echo Invalid rows ^(no title / no password^) go to ^<csv-file^>-invalid.csv.
 if defined USAGEFAIL exit /b 2
 exit /b 0

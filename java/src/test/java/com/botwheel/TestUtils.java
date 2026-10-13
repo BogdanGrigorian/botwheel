@@ -6,12 +6,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
  * TestUtils — test-data generator for CryptoCore (no JUnit tests here).
  *
- * Produces demo vault blobs for manual testing and seeds the bot's demo vault.
+ * Produces a demo vault container (VLT3) for manual testing and for the bot's
+ * seed file.
  *
  * Run (from java/):
  *   .\mvnw -q test-compile exec:java "-Dexec.mainClass=com.botwheel.TestUtils"
@@ -55,10 +57,10 @@ public final class TestUtils {
 
     private TestUtils() {}
 
-    /** Result of createRecords(). */
+    /** Result of the record builders: the vault header + the plaintext records. */
     public static class Created {
-        public byte[] salt;
-        public List<CryptoCore.Entry> entries;
+        public String headerB64;
+        public List<CryptoCore.Record> records;
     }
 
     public static String randomString(int length, String alphabet) {
@@ -70,15 +72,11 @@ public final class TestUtils {
         return sb.toString();
     }
 
-    /**
-     * Create n records: random login, email and password; password encrypted,
-     * title/url/notes/login/email in plaintext. Returns { salt, entries }.
-     */
-    public static Created createRecords(int n, String password) throws Exception {
-        byte[] salt = CryptoCore.randomBytes(CryptoCore.SALT_BYTES);
-        SecretKeySpec key = CryptoCore.deriveKey(password, salt, CryptoCore.KdfParams.DEFAULT_ARGON2);
-
-        List<CryptoCore.Entry> entries = new ArrayList<>();
+    /** Create n records with random login, e-mail and password. */
+    public static Created createRecords(int n) {
+        Created c = new Created();
+        c.headerB64 = CryptoCore.newVaultHeader();
+        c.records = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             String login = "user" + randomString(6, LOGIN_ALPHABET);
             String email = login + "@" + NAMES[i % NAMES.length];
@@ -86,33 +84,33 @@ public final class TestUtils {
             String name = NAMES[i % NAMES.length] + "-" + (i + 1);
             String url = "https://" + NAMES[i % NAMES.length];
             String notes = NOTES[i % NOTES.length];
-            String s = CryptoCore.encryptWithKey(key, pass);
-            entries.add(new CryptoCore.Entry(name, url, notes, login, email, s));
+            c.records.add(new CryptoCore.Record(name, url, notes, login, email, pass));
         }
-
-        Created c = new Created();
-        c.salt = salt;
-        c.entries = entries;
         return c;
     }
 
-    /**
-     * Create the curated demo vault (varied records exercising optional fields).
-     */
-    public static Created createDemoRecords(String password) throws Exception {
-        byte[] salt = CryptoCore.randomBytes(CryptoCore.SALT_BYTES);
-        SecretKeySpec key = CryptoCore.deriveKey(password, salt, CryptoCore.KdfParams.DEFAULT_ARGON2);
-
-        List<CryptoCore.Entry> entries = new ArrayList<>();
-        for (String[] row : DEMO_RECORDS) {
-            String s = CryptoCore.encryptWithKey(key, row[5]);
-            entries.add(new CryptoCore.Entry(row[0], row[1], row[2], row[3], row[4], s));
-        }
-
+    /** Create the curated demo vault (varied records exercising optional fields). */
+    public static Created createDemoRecords() {
         Created c = new Created();
-        c.salt = salt;
-        c.entries = entries;
+        c.headerB64 = CryptoCore.newVaultHeader();
+        c.records = new ArrayList<>();
+        for (String[] row : DEMO_RECORDS) {
+            c.records.add(new CryptoCore.Record(row[0], row[1], row[2], row[3], row[4], row[5]));
+        }
         return c;
+    }
+
+    /** Seal the plaintext records into the VLT3 container string. */
+    public static String buildContainer(Created created, String password) throws Exception {
+        SecretKeySpec key = CryptoCore.deriveKey(password,
+                CryptoCore.headerSalt(created.headerB64), CryptoCore.headerKdf(created.headerB64));
+        List<CryptoCore.StoredRecord> stored = new ArrayList<>();
+        for (CryptoCore.Record r : created.records) {
+            String json = CryptoCore.canonicalRecord(r);
+            stored.add(new CryptoCore.StoredRecord(
+                    CryptoCore.recordId(json), CryptoCore.encryptRecord(key, json)));
+        }
+        return CryptoCore.buildVault(created.headerB64, stored);
     }
 
     public static void main(String[] args) throws Exception {
@@ -128,54 +126,49 @@ public final class TestUtils {
                 : "Records        : " + DEMO_RECORDS.length + " (demo set)");
         System.out.println();
 
-        // 1) Single-field demo
-        String field = CryptoCore.encryptSecret("s3cret_P@ssword!", USER_PASSWORD);
-        System.out.println("Field encrypt  : " + field);
-        System.out.println("Field decrypt  : " + CryptoCore.decryptSecret(field, USER_PASSWORD));
+        // 1) Build the plaintext records
+        Created created = n > 0 ? createRecords(n) : createDemoRecords();
+        CryptoCore.Record r0 = created.records.get(0);
+        System.out.println("Header (b64url): " + created.headerB64);
+        System.out.println("Sample record  : " + CryptoCore.canonicalRecord(r0));
         System.out.println();
 
-        // 2) Build a vault of records
-        Created created = n > 0 ? createRecords(n, USER_PASSWORD) : createDemoRecords(USER_PASSWORD);
-        CryptoCore.Entry e0 = created.entries.get(0);
-        System.out.println("Salt (b64url)  : " + CryptoCore.toBase64url(created.salt));
-        System.out.println("Sample entry   : {\"n\":" + CryptoCore.jsonString(e0.n)
-                + ",\"u\":" + CryptoCore.jsonString(e0.u)
-                + ",\"o\":" + CryptoCore.jsonString(e0.o)
-                + ",\"l\":" + CryptoCore.jsonString(e0.l)
-                + ",\"e\":" + CryptoCore.jsonString(e0.e)
-                + ",\"s\":" + CryptoCore.jsonString(e0.s) + "}");
+        // 2) Seal them into the container the bot sends and the Mini App pastes
+        String container = buildContainer(created, USER_PASSWORD);
+        System.out.println("VAULT CONTAINER (" + container.length() + " chars):");
+        System.out.println(container);
         System.out.println();
 
-        // 3) The transport string
-        String blob = CryptoCore.encryptDatabase(
-                created.entries, USER_PASSWORD, created.salt, CryptoCore.KdfParams.DEFAULT_ARGON2);
-        System.out.println("VAULT BLOB (" + blob.length() + " chars):");
-        System.out.println(blob);
-        System.out.println();
-        System.out.println("Fits in a Telegram message (<=4096)? "
-                + (blob.length() <= 4096 ? "YES" : "NO"));
-        System.out.println();
-
-        // 4) Round-trip verification
-        CryptoCore.Vault vault = CryptoCore.decryptDatabase(blob, USER_PASSWORD);
-        List<CryptoCore.DecryptedEntry> decrypted =
-                CryptoCore.decryptEntries(vault.entries, USER_PASSWORD, vault.salt, vault.kdf);
-        System.out.println("Round-trip OK  : " + decrypted.size() + " entries decrypted");
+        // 3) Round-trip verification
+        CryptoCore.VaultStructure structure = CryptoCore.parseVaultStructure(container);
+        List<CryptoCore.Record> back = CryptoCore.openRecords(structure, USER_PASSWORD);
+        if (back.size() != created.records.size()) {
+            throw new IllegalStateException("record count changed through the round trip");
+        }
+        // The container stores records sorted by content id, so compare as sets.
+        List<String> want = new ArrayList<>();
+        for (CryptoCore.Record r : created.records) {
+            want.add(CryptoCore.canonicalRecord(r));
+        }
+        List<String> got = new ArrayList<>();
+        for (CryptoCore.Record r : back) {
+            got.add(CryptoCore.canonicalRecord(r));
+        }
+        Collections.sort(want);
+        Collections.sort(got);
+        if (!want.equals(got)) {
+            throw new IllegalStateException("records changed through the round trip");
+        }
+        System.out.println("Round-trip OK  : " + back.size() + " records decrypted");
         System.out.println("First 3 decoded:");
-        for (int i = 0; i < Math.min(3, decrypted.size()); i++) {
-            CryptoCore.DecryptedEntry e = decrypted.get(i);
-            System.out.println("   {\"n\":" + CryptoCore.jsonString(e.n)
-                    + ",\"u\":" + CryptoCore.jsonString(e.u)
-                    + ",\"o\":" + CryptoCore.jsonString(e.o)
-                    + ",\"l\":" + CryptoCore.jsonString(e.l)
-                    + ",\"e\":" + CryptoCore.jsonString(e.e)
-                    + ",\"password\":" + CryptoCore.jsonString(e.password) + "}");
+        for (int i = 0; i < Math.min(3, back.size()); i++) {
+            System.out.println("   " + CryptoCore.canonicalRecord(back.get(i)));
         }
         System.out.println();
 
-        // 5) Wrong password must fail
+        // 4) Wrong password must fail
         try {
-            CryptoCore.decryptDatabase(blob, "wrong-password");
+            CryptoCore.openRecords(structure, "wrong-password");
             System.out.println("Wrong password : FAILED TO DETECT (bug!)");
         } catch (Exception ex) {
             System.out.println("Wrong password : correctly rejected ("
@@ -184,24 +177,24 @@ public final class TestUtils {
         }
         System.out.println();
 
-        // 6) Write outputs for inspection
+        // 5) Write outputs for inspection
         Path outTxt = Paths.get("test-vault.txt");
         Path outJson = Paths.get("test-vault.decrypted.json");
-        Files.write(outTxt, blob.getBytes(StandardCharsets.UTF_8));
+        Files.write(outTxt, container.getBytes(StandardCharsets.UTF_8));
 
         StringBuilder json = new StringBuilder();
-        json.append("{\"salt\":\"").append(CryptoCore.toBase64url(created.salt)).append("\",\"entries\":[");
-        for (int i = 0; i < decrypted.size(); i++) {
+        json.append("{\"header\":\"").append(created.headerB64).append("\",\"records\":[");
+        for (int i = 0; i < back.size(); i++) {
             if (i > 0) {
                 json.append(',');
             }
-            CryptoCore.DecryptedEntry e = decrypted.get(i);
-            json.append("{\"n\":").append(CryptoCore.jsonString(e.n))
-                .append(",\"u\":").append(CryptoCore.jsonString(e.u))
-                .append(",\"o\":").append(CryptoCore.jsonString(e.o))
-                .append(",\"l\":").append(CryptoCore.jsonString(e.l))
-                .append(",\"e\":").append(CryptoCore.jsonString(e.e))
-                .append(",\"password\":").append(CryptoCore.jsonString(e.password))
+            CryptoCore.Record r = back.get(i);
+            json.append("{\"n\":").append(CryptoCore.jsonString(r.n))
+                .append(",\"u\":").append(CryptoCore.jsonString(r.u))
+                .append(",\"o\":").append(CryptoCore.jsonString(r.o))
+                .append(",\"l\":").append(CryptoCore.jsonString(r.l))
+                .append(",\"e\":").append(CryptoCore.jsonString(r.e))
+                .append(",\"p\":").append(CryptoCore.jsonString(r.p))
                 .append('}');
         }
         json.append("]}");
